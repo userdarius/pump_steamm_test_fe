@@ -36,13 +36,29 @@ const EInvalidAmount: u64 = 2;
 const ENotAuthorized: u64 = 3;
 const ENegativeTokenMinting: u64 = 4;
 
+// Getter functions for constants (for testing)
+#[test_only]
+public fun get_initial_virtual_sui(): u64 {
+    INITIAL_VIRTUAL_SUI
+}
+
+#[test_only]
+public fun get_initial_virtual_tokens(): u64 {
+    INITIAL_VIRTUAL_TOKENS
+}
+
+#[test_only]
+public fun get_listing_threshold(): u64 {
+    LISTING_THRESHOLD
+}
+
 /// A unique token witness with a specific token ID for unique type creation
-public struct UniqueTokenWitness has drop, store {
+public struct UniqueTokenWitness has drop {
     token_id: u64
 }
 
 /// Bonding curve configuration and state
-public struct BondingCurve<phantom T> has key, store {
+public struct BondingCurve<phantom T> has key {
     id: UID,
     treasury_cap: TreasuryCap<T>,
     metadata: CoinMetadata<T>,
@@ -55,25 +71,15 @@ public struct BondingCurve<phantom T> has key, store {
     version: Version
 }
 
-/// Initialize new bonding curve token
-public fun create_token<T: drop + store>(
+/// Initialize new bonding curve with an existing treasury cap and metadata
+public fun create_bonding_curve<T: drop>(
     registry: &mut Registry,
-    creator: T,
-    name: vector<u8>,
-    symbol: vector<u8>,
-    description: vector<u8>,
+    treasury_cap: TreasuryCap<T>,
+    metadata: CoinMetadata<T>,
     ctx: &mut TxContext
 ): BondingCurve<T> {
-
-    let (treasury_cap, metadata) = coin::create_currency<T>(
-        creator,
-        9, // Decimals
-        name,
-        symbol,
-        description,
-        option::none(),
-        ctx,
-    );
+    // Ensure no tokens have been minted yet
+    assert!(coin::total_supply(&treasury_cap) == 0, EInvalidAmount);
 
     let bonding_curve = BondingCurve {
         id: object::new(ctx),
@@ -97,7 +103,6 @@ public fun create_token<T: drop + store>(
     bonding_curve
 }
 
-/// The most straightforward approach to create a unique token
 /// Uses the token factory to ensure each token has a unique witness type
 public entry fun create_unique_token(
     registry: &mut Registry,
@@ -113,18 +118,27 @@ public entry fun create_unique_token(
     // Create a unique witness for this specific token
     let witness = UniqueTokenWitness { token_id };
     
-    // Use the witness to create the bonding curve token
-    let bonding_curve = create_token(
-        registry,
+    // Create the currency first with the UniqueTokenWitness type
+    let (treasury_cap, metadata) = coin::create_currency(
         witness,
+        9, // Decimals
         name,
         symbol,
         description,
+        option::none(),
+        ctx,
+    );
+    
+    // Use the treasury cap and metadata to create the bonding curve
+    let bonding_curve = create_bonding_curve(
+        registry,
+        treasury_cap,
+        metadata,
         ctx
     );
     
-    // Transfer the bonding curve to the sender
-    transfer::public_transfer(bonding_curve, tx_context::sender(ctx));
+    // Share the bonding curve object instead of transferring it
+    transfer::share_object(bonding_curve);
 }
 
 // Events
@@ -400,7 +414,7 @@ public fun is_transitioned<T>(bonding_curve: &BondingCurve<T>): bool {
 
 /// Create a bonding curve for testing purposes
 #[test_only]
-public fun create_for_testing<T: drop + store>(
+public fun create_for_testing<T: drop>(
     registry: &mut Registry,
     treasury_cap: TreasuryCap<T>,
     metadata: CoinMetadata<T>,
@@ -429,7 +443,7 @@ public fun create_for_testing<T: drop + store>(
 
 /// Create a simplified version of BondingCurve for testing
 #[test_only]
-public struct MockBondingCurve has key, store {
+public struct MockBondingCurve has key {
     id: UID,
     total_minted: u64,
     virtual_sui_reserves: u64,
@@ -585,4 +599,14 @@ public fun increment_total_minted_mock(bonding_curve: &mut MockBondingCurve, val
 #[test_only]
 public fun decrement_total_minted_mock(bonding_curve: &mut MockBondingCurve, value: u64) {
     bonding_curve.total_minted = bonding_curve.total_minted - value;
+}
+
+#[test_only]
+public fun share_mock_bonding_curve(bonding_curve: MockBondingCurve) {
+    transfer::share_object(bonding_curve);
+}
+
+#[test_only]
+public fun share_bonding_curve<T>(bonding_curve: BondingCurve<T>) {
+    transfer::share_object(bonding_curve);
 }

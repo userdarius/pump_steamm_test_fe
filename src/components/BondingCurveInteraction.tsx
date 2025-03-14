@@ -37,7 +37,7 @@ const BondingCurveInteraction: React.FC = () => {
   const currentAccount = useCurrentAccount();
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
 
-  // Default to the package ID from pump_steamm_copy
+  // Default to the package ID from pump_steamm
   const [packageId, setPackageId] = useState(
     "0xa97e62009dfb93f3ee1e5600bfa225739f332f05483ef4f77005a8c5591f4ff0"
   );
@@ -53,11 +53,10 @@ const BondingCurveInteraction: React.FC = () => {
 
   // Added state for token creation
   const [registryId, setRegistryId] = useState("");
+  const [tokenFactoryId, setTokenFactoryId] = useState("");
   const [tokenName, setTokenName] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("");
   const [tokenDescription, setTokenDescription] = useState("");
-  const [tokenTypeArg, setTokenTypeArg] = useState(""); // Keep this for internal use
-  const [moduleName, setModuleName] = useState(""); // New state for module name
 
   // Fetch user's tokens when address or coin type changes
   useEffect(() => {
@@ -86,6 +85,7 @@ const BondingCurveInteraction: React.FC = () => {
     if (
       !packageId ||
       !registryId ||
+      !tokenFactoryId ||
       !tokenName ||
       !tokenSymbol ||
       !tokenDescription
@@ -109,6 +109,7 @@ const BondingCurveInteraction: React.FC = () => {
       console.log("Using parameters:");
       console.log("- Package ID:", packageId);
       console.log("- Registry ID:", registryId);
+      console.log("- Token Factory ID:", tokenFactoryId);
       console.log("- Token name:", tokenName);
       console.log("- Token symbol:", tokenSymbol);
       console.log("- Token description:", tokenDescription);
@@ -118,7 +119,7 @@ const BondingCurveInteraction: React.FC = () => {
       const symbolBytes = Array.from(new TextEncoder().encode(tokenSymbol));
       const descBytes = Array.from(new TextEncoder().encode(tokenDescription));
 
-      // Updated to use the pump_steamm_copy contract interface
+      // Use create_unique_token function which now requires token factory
       tx.moveCall({
         target: `${packageId}::bonding_curve::create_unique_token`,
         arguments: [
@@ -126,6 +127,7 @@ const BondingCurveInteraction: React.FC = () => {
           tx.pure.vector("u8", nameBytes),
           tx.pure.vector("u8", symbolBytes),
           tx.pure.vector("u8", descBytes),
+          tx.object(tokenFactoryId),
         ],
       });
 
@@ -137,35 +139,11 @@ const BondingCurveInteraction: React.FC = () => {
         },
         {
           onSuccess: (result) => {
-            setTxResult(JSON.stringify(result, null, 2));
             handleTransactionSuccess(result);
             setLoading(false);
           },
           onError: (error) => {
             handleTransactionError(error);
-
-            // Add more specific error information for debugging
-            console.error("Full transaction error:", error);
-
-            // If we're still getting errors, try advising the user about the CLI approach
-            const errorStr = String(error);
-            if (errorStr.includes("VMVerificationOrDeserializationError")) {
-              setTxResult(
-                (prevResult) =>
-                  prevResult +
-                  "\n\nIf the above method fails, try using the Sui CLI with:\n\nsui client call --package " +
-                  packageId +
-                  " --module bonding_curve --function create_unique_token --args " +
-                  registryId +
-                  ' "[' +
-                  nameBytes +
-                  ']" "[' +
-                  symbolBytes +
-                  ']" "[' +
-                  descBytes +
-                  ']"'
-              );
-            }
             setLoading(false);
           },
         }
@@ -176,100 +154,72 @@ const BondingCurveInteraction: React.FC = () => {
     }
   };
 
-  // Helper function to handle transaction success
   const handleTransactionSuccess = (result: any) => {
+    setTxResult(JSON.stringify(result, null, 2));
+
+    // Try to extract bonding curve ID and coin type from events
     try {
-      // Cast the result to our TransactionResult type
-      const txResult = result as unknown as TransactionResult;
-      // Look for the NewBondingCurveResult event in the transaction effects
-      const events = txResult.effects?.events || [];
-      console.log("Transaction events:", events);
+      if (result.effects?.events) {
+        // Look for NewBondingCurveResult event
+        const newBondingCurveEvent = result.effects.events.find(
+          (event: SuiEvent) =>
+            event.type.includes("::bonding_curve::NewBondingCurveResult")
+        );
 
-      // Look for bonding curve events from pump_steamm_copy
-      const bondingCurveEvent = events.find(
-        (event: SuiEvent) =>
-          event.type &&
-          (event.type.includes("::bonding_curve::NewBondingCurveResult") ||
-            event.type.includes("::bonding_curve::TokenCreated"))
-      );
-
-      if (bondingCurveEvent && bondingCurveEvent.parsedJson) {
-        // Extract bonding curve ID - field name might be bonding_curve_id or token_id depending on event
-        const bondingCurveId =
-          bondingCurveEvent.parsedJson.bonding_curve_id ||
-          bondingCurveEvent.parsedJson.token_id;
-
-        const coinType =
-          bondingCurveEvent.parsedJson.coin_type ||
-          bondingCurveEvent.parsedJson.token_type;
-
-        if (bondingCurveId) {
-          setBondingCurveId(bondingCurveId);
-
-          // If we have the coin_type in the event, use that
-          if (coinType) {
-            setCoinTypeArg(coinType);
-            setTokenTypeArg(coinType);
-          } else {
-            // Otherwise use our best guess based on the package ID
-            const generatedType = `${packageId}::bonding_curve::TokenWitness`;
-            setCoinTypeArg(generatedType);
-            setTokenTypeArg(generatedType);
-          }
-
-          setTxResult(
-            `Bonding curve created successfully with ID: ${bondingCurveId}`
+        if (newBondingCurveEvent?.parsedJson?.bonding_curve_id) {
+          setBondingCurveId(newBondingCurveEvent.parsedJson.bonding_curve_id);
+          console.log(
+            "Found bonding curve ID:",
+            newBondingCurveEvent.parsedJson.bonding_curve_id
           );
 
-          // Attempt to refresh token list in case any were minted
-          setTimeout(() => {
-            refreshTokens();
-          }, 2000); // Small delay to allow blockchain to update
+          // Extract the coin type from the event
+          if (newBondingCurveEvent?.parsedJson?.coin_type) {
+            // Convert to proper coin type format
+            const rawType = newBondingCurveEvent.parsedJson.coin_type;
+            console.log("Raw coin type:", rawType);
+
+            // Extract the relevant part for frontend use
+            const typeParts = rawType.split("::");
+            if (typeParts.length === 3) {
+              const coinTypeFormatted = `${packageId}::${typeParts[2]}`;
+              setCoinTypeArg(coinTypeFormatted);
+              console.log("Set coin type to:", coinTypeFormatted);
+            }
+          }
         }
       }
     } catch (error) {
-      console.error("Error extracting bonding curve ID:", error);
+      console.error("Error parsing transaction result:", error);
     }
   };
 
-  // Helper function to handle transaction errors
   const handleTransactionError = (error: any) => {
-    console.error("Transaction error details:", error);
+    console.error("Transaction error:", error);
 
-    // Provide a more detailed error message
-    let errorMessage = "Error executing transaction";
+    let errorMessage = "Transaction failed";
 
     if (error instanceof Error) {
-      errorMessage = `Error: ${error.message}`;
-
-      // Check for Sui-specific error properties
-      if ("cause" in error) {
-        const causeObj = error.cause as any;
-        errorMessage += `\nCause: ${JSON.stringify(error.cause)}`;
-
-        // Extract error details if they exist
-        if (causeObj?.data?.error) {
-          errorMessage += `\nSUI Error: ${causeObj.data.error}`;
-        }
-
-        // Look for specific VMVerificationOrDeserializationError patterns
-        if (
-          typeof causeObj === "string" &&
-          causeObj.includes("VMVerificationOrDeserializationError")
-        ) {
-          errorMessage += `\nDetailed VM Error: ${causeObj}`;
-        }
-      }
-
-      // Check for code property which often contains useful error info
-      if ("code" in error && (error as any).code) {
-        errorMessage += `\nError Code: ${(error as any).code}`;
-      }
-    } else {
-      errorMessage = `Error: ${String(error)}`;
+      errorMessage = error.message;
+    } else if (typeof error === "object" && error !== null) {
+      errorMessage = error.message || error.toString() || JSON.stringify(error);
+    } else if (error !== null && error !== undefined) {
+      errorMessage = String(error);
     }
 
-    setTxResult(errorMessage);
+    // Try to extract SUI error details
+    try {
+      const errorJson = JSON.parse(errorMessage);
+      if (errorJson.data && errorJson.data.errors) {
+        errorMessage = errorJson.data.errors
+          .map((e: any) => e.message || JSON.stringify(e))
+          .join(", ");
+      }
+    } catch (e) {
+      // Not a JSON error, use the original message
+    }
+
+    setTxResult(`Error: ${errorMessage}`);
   };
 
   // Function to buy tokens
@@ -284,24 +234,22 @@ const BondingCurveInteraction: React.FC = () => {
       setTxResult("Buying tokens...");
 
       const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the updated contract)
       const amount = Math.floor(Number(buyAmount) * 1000000000);
 
       // Create SUI coin for payment
       const [coin] = tx.splitCoins(tx.gas, [amount]);
 
-      // Call the buy function - the interface is the same in pump_steamm_copy
+      // Call the buy function
       tx.moveCall({
         target: `${packageId}::bonding_curve::buy`,
         typeArguments: [coinTypeArg],
         arguments: [tx.object(bondingCurveId), coin],
       });
 
-      // Serialize transaction to string to avoid type conflicts
-      const serializedTx = tx.serialize();
-
       signAndExecuteTransaction(
         {
-          transaction: serializedTx,
+          transaction: tx.serialize(),
         },
         {
           onSuccess: (result) => {
@@ -338,25 +286,23 @@ const BondingCurveInteraction: React.FC = () => {
       setTxResult("Selling tokens...");
 
       const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the updated contract)
       const amount = Math.floor(Number(sellAmount) * 1000000000);
 
       // Use the selected token object ID
       // Create a coin object with the amount to sell
       const [tokenCoin] = tx.splitCoins(tx.object(selectedToken), [amount]);
 
-      // Call the sell function - the interface is the same in pump_steamm_copy
+      // Call the sell function
       tx.moveCall({
         target: `${packageId}::bonding_curve::sell`,
         typeArguments: [coinTypeArg],
         arguments: [tx.object(bondingCurveId), tokenCoin],
       });
 
-      // Serialize transaction to string to avoid type conflicts
-      const serializedTx = tx.serialize();
-
       signAndExecuteTransaction(
         {
-          transaction: serializedTx,
+          transaction: tx.serialize(),
         },
         {
           onSuccess: (result) => {
@@ -414,207 +360,250 @@ const BondingCurveInteraction: React.FC = () => {
         style={{
           marginBottom: "20px",
           padding: "15px",
-          backgroundColor: "#f8f9fa",
+          border: "1px solid #ddd",
           borderRadius: "5px",
         }}
       >
-        <p style={{ fontSize: "14px", color: "#444", marginBottom: "10px" }}>
-          This interface allows you to interact with the pump_steamm_copy
-          bonding curve contracts. You can create new tokens, buy tokens with
-          SUI, and sell tokens back to the bonding curve.
-        </p>
-        <p style={{ fontSize: "14px", color: "#444", marginBottom: "0" }}>
-          The bonding curve uses a constant product formula (x * y = k) to
-          determine token prices, with virtual reserves to establish the initial
-          price curve.
-        </p>
-      </div>
-
-      <div>
-        <h3>Contract Information</h3>
+        <h3>Configuration</h3>
         <div>
-          <label>
-            Package ID:
-            <input
-              type="text"
-              value={packageId}
-              onChange={(e) => setPackageId(e.target.value)}
-              placeholder="Enter package ID"
-            />
-            <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
-              Default: pump_steamm_copy package ID
-            </div>
-          </label>
-        </div>
-        <div>
-          <label>
-            Bonding Curve ID:
-            <input
-              type="text"
-              value={bondingCurveId}
-              onChange={(e) => setBondingCurveId(e.target.value)}
-              placeholder="Enter bonding curve object ID"
-              readOnly={true}
-              title="This will be automatically populated after creating a token"
-              style={{ backgroundColor: "#f0f0f0", cursor: "not-allowed" }}
-            />
-            {!bondingCurveId && (
-              <div
-                style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}
-              >
-                This will be automatically populated after creating a token
-              </div>
-            )}
-          </label>
-        </div>
-        <div>
-          <label>
-            Coin Type Argument:
-            <input
-              type="text"
-              value={coinTypeArg}
-              onChange={(e) => setCoinTypeArg(e.target.value)}
-              placeholder="Enter coin type argument (e.g., 0x2::sui::SUI)"
-              readOnly={true}
-              title="This will be automatically populated to match the token type"
-              style={{ backgroundColor: "#f0f0f0", cursor: "not-allowed" }}
-            />
-            {!coinTypeArg && (
-              <div
-                style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}
-              >
-                This will be automatically set to match the token type
-              </div>
-            )}
-          </label>
+          <label htmlFor="packageId">Package ID:</label>
+          <input
+            id="packageId"
+            type="text"
+            value={packageId}
+            onChange={(e) => setPackageId(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
       </div>
 
-      <div>
-        <h3>Create Bonding Curve</h3>
-        <div style={{ marginBottom: "15px", fontSize: "14px", color: "#444" }}>
-          Create a new token with the pump_steamm_copy bonding curve contract.
-          Each token will have a unique ID in the system.
+      <div
+        style={{
+          marginBottom: "20px",
+          padding: "15px",
+          border: "1px solid #ddd",
+          borderRadius: "5px",
+        }}
+      >
+        <h3>Create New Bonding Curve</h3>
+        <div>
+          <label htmlFor="registryId">Registry ID:</label>
+          <input
+            id="registryId"
+            type="text"
+            value={registryId}
+            onChange={(e) => setRegistryId(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
         <div>
-          <label>
-            Registry ID:
-            <input
-              type="text"
-              value={registryId}
-              onChange={(e) => setRegistryId(e.target.value)}
-              placeholder="Enter registry object ID"
-            />
-            <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
-              The registry object ID from the pump_steamm_copy package
-              deployment
-            </div>
-          </label>
+          <label htmlFor="tokenFactoryId">Token Factory ID:</label>
+          <input
+            id="tokenFactoryId"
+            type="text"
+            value={tokenFactoryId}
+            onChange={(e) => setTokenFactoryId(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
         <div>
-          <label>
-            Token Name:
-            <input
-              type="text"
-              value={tokenName}
-              onChange={(e) => setTokenName(e.target.value)}
-              placeholder="Enter token name"
-            />
-          </label>
+          <label htmlFor="tokenName">Token Name:</label>
+          <input
+            id="tokenName"
+            type="text"
+            value={tokenName}
+            onChange={(e) => setTokenName(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
         <div>
-          <label>
-            Token Symbol:
-            <input
-              type="text"
-              value={tokenSymbol}
-              onChange={(e) => setTokenSymbol(e.target.value)}
-              placeholder="Enter token symbol"
-            />
-          </label>
+          <label htmlFor="tokenSymbol">Token Symbol:</label>
+          <input
+            id="tokenSymbol"
+            type="text"
+            value={tokenSymbol}
+            onChange={(e) => setTokenSymbol(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
         <div>
-          <label>
-            Token Description:
-            <input
-              type="text"
-              value={tokenDescription}
-              onChange={(e) => setTokenDescription(e.target.value)}
-              placeholder="Enter token description"
-            />
-          </label>
+          <label htmlFor="tokenDescription">Token Description:</label>
+          <input
+            id="tokenDescription"
+            type="text"
+            value={tokenDescription}
+            onChange={(e) => setTokenDescription(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
         </div>
-        <button onClick={createBondingCurve} disabled={loading}>
-          Create Bonding Curve
+        <button
+          onClick={createBondingCurve}
+          disabled={loading}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: loading ? "#ccc" : "#0070f3",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            cursor: loading ? "not-allowed" : "pointer",
+          }}
+        >
+          {loading ? "Processing..." : "Create Token & Bonding Curve"}
         </button>
       </div>
 
-      <div>
-        <h3>Buy Tokens</h3>
+      <div
+        style={{
+          marginBottom: "20px",
+          padding: "15px",
+          border: "1px solid #ddd",
+          borderRadius: "5px",
+        }}
+      >
+        <h3>Interact with Existing Bonding Curve</h3>
         <div>
-          <label>
-            SUI Amount:
+          <label htmlFor="bondingCurveId">Bonding Curve ID:</label>
+          <input
+            id="bondingCurveId"
+            type="text"
+            value={bondingCurveId}
+            onChange={(e) => setBondingCurveId(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
+        </div>
+        <div>
+          <label htmlFor="coinTypeArg">Coin Type (e.g. 0x...::xxx):</label>
+          <input
+            id="coinTypeArg"
+            type="text"
+            value={coinTypeArg}
+            onChange={(e) => setCoinTypeArg(e.target.value)}
+            style={{ width: "100%", marginBottom: "10px" }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="buyAmount">Buy Amount (SUI):</label>
             <input
+              id="buyAmount"
               type="number"
               value={buyAmount}
               onChange={(e) => setBuyAmount(e.target.value)}
-              placeholder="Enter SUI amount"
+              style={{ width: "100%" }}
             />
-          </label>
-        </div>
-        <button onClick={buyTokens} disabled={loading}>
-          Buy Tokens
-        </button>
-      </div>
-
-      <div>
-        <h3>Sell Tokens</h3>
-        <div>
-          <label>
-            Select Token:
-            <select
-              value={selectedToken}
-              onChange={(e) => setSelectedToken(e.target.value)}
-              disabled={ownedTokens.length === 0}
+            <button
+              onClick={buyTokens}
+              disabled={loading}
+              style={{
+                padding: "5px 10px",
+                backgroundColor: loading ? "#ccc" : "#0070f3",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: loading ? "not-allowed" : "pointer",
+                marginTop: "5px",
+              }}
             >
-              {ownedTokens.length === 0 ? (
-                <option value="">No tokens available</option>
-              ) : (
-                ownedTokens.map((token) => (
-                  <option key={token.id} value={token.id}>
-                    {token.id} (Balance: {Number(token.balance) / 1000000000}{" "}
-                    tokens)
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
-          <button onClick={refreshTokens} disabled={loading}>
-            Refresh Tokens
-          </button>
-        </div>
-        <div>
-          <label>
-            Token Amount:
+              {loading ? "Processing..." : "Buy Tokens"}
+            </button>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="sellAmount">Sell Amount (Tokens):</label>
             <input
+              id="sellAmount"
               type="number"
               value={sellAmount}
               onChange={(e) => setSellAmount(e.target.value)}
-              placeholder="Enter token amount"
+              style={{ width: "100%" }}
             />
-          </label>
+            {ownedTokens.length > 0 && (
+              <select
+                value={selectedToken}
+                onChange={(e) => setSelectedToken(e.target.value)}
+                style={{ width: "100%", marginTop: "5px" }}
+              >
+                {ownedTokens.map((token) => (
+                  <option key={token.id} value={token.id}>
+                    {token.id.substring(0, 8)}... (
+                    {Number(token.balance) / 1000000000} tokens)
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={sellTokens}
+              disabled={loading || ownedTokens.length === 0}
+              style={{
+                padding: "5px 10px",
+                backgroundColor:
+                  loading || ownedTokens.length === 0 ? "#ccc" : "#0070f3",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor:
+                  loading || ownedTokens.length === 0
+                    ? "not-allowed"
+                    : "pointer",
+                marginTop: "5px",
+              }}
+            >
+              {loading ? "Processing..." : "Sell Tokens"}
+            </button>
+          </div>
         </div>
         <button
-          onClick={sellTokens}
-          disabled={loading || ownedTokens.length === 0}
+          onClick={refreshTokens}
+          disabled={loading || !coinTypeArg}
+          style={{
+            padding: "5px 10px",
+            backgroundColor: loading || !coinTypeArg ? "#ccc" : "#0070f3",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            cursor: loading || !coinTypeArg ? "not-allowed" : "pointer",
+          }}
         >
-          Sell Tokens
+          {loading ? "Processing..." : "Refresh Token List"}
         </button>
       </div>
 
-      <div>
+      <div
+        style={{
+          marginBottom: "20px",
+          padding: "15px",
+          border: "1px solid #ddd",
+          borderRadius: "5px",
+        }}
+      >
+        <h3>Owned Tokens</h3>
+        {ownedTokens.length > 0 ? (
+          <ul>
+            {ownedTokens.map((token) => (
+              <li key={token.id}>
+                ID: {token.id.substring(0, 12)}...{" "}
+                <strong>
+                  Balance: {Number(token.balance) / 1000000000} tokens
+                </strong>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No tokens found. Buy some tokens first!</p>
+        )}
+      </div>
+
+      <div
+        style={{
+          marginBottom: "20px",
+          padding: "15px",
+          border: "1px solid #ddd",
+          borderRadius: "5px",
+          maxHeight: "300px",
+          overflow: "auto",
+        }}
+      >
         <h3>Transaction Result</h3>
-        <pre style={{ maxHeight: "300px", overflow: "auto" }}>{txResult}</pre>
+        <pre style={{ whiteSpace: "pre-wrap" }}>{txResult}</pre>
       </div>
     </div>
   );
