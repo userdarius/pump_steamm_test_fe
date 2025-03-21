@@ -6,11 +6,12 @@ module pump_steamm::pump_steamm_tests {
     use sui::transfer;
     use sui::object::{Self, ID};
     use sui::tx_context::{Self, TxContext};
+    use sui::test_utils::{destroy, create_one_time_witness};
     use std::option::{Self, Option};
     
     use pump_steamm::bonding_curve::{Self, MockBondingCurve};
     use pump_steamm::registry::{Self};
-    use pump_steamm::token_factory::{Self as factory};
+    use pump_steamm::test_token::TEST_TOKEN;
     
     const INITIAL_VIRTUAL_SUI: u64 = 30_000_000_000; // 30 SUI with 9 decimals
     const INITIAL_VIRTUAL_TOKENS: u64 = 1_000_000_000_000_000; // 1 million tokens with 9 decimals 
@@ -18,8 +19,6 @@ module pump_steamm::pump_steamm_tests {
     
     const TEST_ADDR: address = @0xA;
     const TEST_ADDR_2: address = @0xB;
-    
-    public struct TEST_TOKEN has drop {}
     
     #[test]
     fun test_math() {
@@ -430,6 +429,31 @@ module pump_steamm::pump_steamm_tests {
             
             transfer::public_share_object(registry);
             bonding_curve::share_mock_bonding_curve(bonding_curve);
+        };
+        
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun test_create_unique_token() {
+        let mut scenario = ts::begin(TEST_ADDR);
+        
+        {
+            let ctx = ts::ctx(&mut scenario);
+            let mut registry = registry::init_for_testing(ctx);
+            
+            let otw = create_one_time_witness<TEST_TOKEN>();
+            
+            bonding_curve::create_token_with_curve(
+                &mut registry, 
+                otw, 
+                b"Test Token", 
+                b"TEST", 
+                b"Test token description", 
+                ctx
+            );
+            
+            transfer::public_share_object(registry);
         };
         
         ts::end(scenario);

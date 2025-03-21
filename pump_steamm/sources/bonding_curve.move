@@ -17,7 +17,6 @@ use pump_steamm::events::{Self, emit_event};
 use pump_steamm::registry::Registry;
 use pump_steamm::global_admin::GlobalAdmin;
 use sui::math;
-use pump_steamm::token_factory::{Self as factory, TokenFactory};
 
 // Constants
 const CURRENT_VERSION: u16 = 1;
@@ -50,11 +49,6 @@ public fun get_initial_virtual_tokens(): u64 {
 #[test_only]
 public fun get_listing_threshold(): u64 {
     LISTING_THRESHOLD
-}
-
-/// A unique token witness with a specific token ID for unique type creation
-public struct UniqueTokenWitness has drop {
-    token_id: u64
 }
 
 /// Bonding curve configuration and state
@@ -103,25 +97,19 @@ public fun create_bonding_curve<T: drop>(
     bonding_curve
 }
 
-/// Uses the token factory to ensure each token has a unique witness type
-public entry fun create_unique_token(
+/// Helper function to create a bonding curve for a token using a otw
+/// This should be called from the init function of a token module
+public fun create_token_with_curve<OTW: drop>(
     registry: &mut Registry,
+    witness: OTW, 
     name: vector<u8>,
     symbol: vector<u8>,
     description: vector<u8>,
-    factory: &mut TokenFactory,
     ctx: &mut TxContext
 ) {
-    // Get a unique token ID from the factory
-    let token_id = factory::create_new_token_id(factory);
-    
-    // Create a unique witness for this specific token
-    let witness = UniqueTokenWitness { token_id };
-    
-    // Create the currency first with the UniqueTokenWitness type
     let (treasury_cap, metadata) = coin::create_currency(
         witness,
-        9, // Decimals
+        9, 
         name,
         symbol,
         description,
@@ -129,7 +117,6 @@ public entry fun create_unique_token(
         ctx,
     );
     
-    // Use the treasury cap and metadata to create the bonding curve
     let bonding_curve = create_bonding_curve(
         registry,
         treasury_cap,
@@ -137,7 +124,7 @@ public entry fun create_unique_token(
         ctx
     );
     
-    // Share the bonding curve object instead of transferring it
+    // Share the bonding curve object
     transfer::share_object(bonding_curve);
 }
 
@@ -241,7 +228,7 @@ fun calculate_tokens_to_mint<T>(bonding_curve: &BondingCurve<T>, sui_amount: u64
     
     // Tokens to mint is the difference between new supply and current virtual tokens
     if (new_token_supply > (bonding_curve.virtual_token_reserves as u128)) {
-        (new_token_supply - (bonding_curve.virtual_token_reserves as u128) as u64)
+        ((new_token_supply - (bonding_curve.virtual_token_reserves as u128)) as u64)
     } else {
         0 // No tokens minted if calculation would result in a negative number
     }
@@ -472,7 +459,7 @@ public fun create_for_testing_mock(
     };
 
     let bonding_curve_id = object::id(&mock_bonding_curve);
-    // Use a dummy type name since it's just for testing
+
     let coin_type = type_name::get<SUI>();
     
     registry.register_bonding_curve(bonding_curve_id, coin_type);
@@ -515,7 +502,6 @@ public fun test_check_transition<T>(bonding_curve: &mut BondingCurve<T>) {
     check_transition(bonding_curve)
 }
 
-// Add mock versions for MockBondingCurve as well
 #[test_only]
 public fun test_calculate_tokens_to_mint_mock(bonding_curve: &MockBondingCurve, sui_amount: u64): u64 {
     // Reimplement the formula here for MockBondingCurve
