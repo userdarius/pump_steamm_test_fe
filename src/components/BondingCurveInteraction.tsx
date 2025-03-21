@@ -5,26 +5,27 @@ import {
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import { getOwnedTokens } from "../utils/suiUtils";
-import { bcs } from "@mysten/sui/bcs";
 
 // Define types for transaction results and events
 interface SuiEvent {
   type: string;
   parsedJson?: {
     bonding_curve_id?: string;
+    coin_type?: string;
+    sui_amount?: string;
+    tokens_minted?: string;
+    token_amount?: string;
+    sui_received?: string;
+    virtual_sui_reserves?: string;
+    virtual_token_reserves?: string;
     [key: string]: any;
   };
-  [key: string]: any;
 }
 
-interface TransactionEffects {
-  events?: SuiEvent[];
-  [key: string]: any;
-}
-
+// Use a generic interface that allows for different structures
 interface TransactionResult {
   digest?: string;
-  effects?: TransactionEffects;
+  effects?: any; // Using any here to accommodate different response structures
   [key: string]: any;
 }
 
@@ -37,26 +38,38 @@ const BondingCurveInteraction: React.FC = () => {
   const currentAccount = useCurrentAccount();
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
 
-  // Default to the package ID from pump_steamm
+  // State for contract interaction
   const [packageId, setPackageId] = useState(
-    "0xa97e62009dfb93f3ee1e5600bfa225739f332f05483ef4f77005a8c5591f4ff0"
+    "0x4c80d97de0920eed5b2449b9805c70935c4254e60a58f9e26304c953f6cdd7f8"
   );
-
+  const [registryId, setRegistryId] = useState("");
   const [bondingCurveId, setBondingCurveId] = useState("");
   const [coinTypeArg, setCoinTypeArg] = useState("");
-  const [buyAmount, setBuyAmount] = useState("");
-  const [sellAmount, setSellAmount] = useState("");
-  const [txResult, setTxResult] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [ownedTokens, setOwnedTokens] = useState<TokenInfo[]>([]);
-  const [selectedToken, setSelectedToken] = useState<string>("");
 
-  // Added state for token creation
-  const [registryId, setRegistryId] = useState("");
-  const [tokenFactoryId, setTokenFactoryId] = useState("");
+  // State for token objects
+  const [treasuryCapId, setTreasuryCapId] = useState("");
+  const [metadataId, setMetadataId] = useState("");
+
+  // State for token creation
   const [tokenName, setTokenName] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("");
   const [tokenDescription, setTokenDescription] = useState("");
+
+  // State for token transactions
+  const [buyAmount, setBuyAmount] = useState("");
+  const [sellAmount, setSellAmount] = useState("");
+  const [ownedTokens, setOwnedTokens] = useState<TokenInfo[]>([]);
+  const [selectedToken, setSelectedToken] = useState<string>("");
+
+  // UI state
+  const [txResult, setTxResult] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [transactionType, setTransactionType] = useState("create"); // create, buy, sell
+
+  // Stats for display
+  const [virtualSuiReserves, setVirtualSuiReserves] = useState<string>("0");
+  const [virtualTokenReserves, setVirtualTokenReserves] = useState<string>("0");
+  const [hasTransitioned, setHasTransitioned] = useState(false);
 
   // Fetch user's tokens when address or coin type changes
   useEffect(() => {
@@ -80,58 +93,30 @@ const BondingCurveInteraction: React.FC = () => {
     fetchTokens();
   }, [currentAccount, coinTypeArg]);
 
-  // Function to create a new bonding curve
-  const createBondingCurve = async () => {
-    if (
-      !packageId ||
-      !registryId ||
-      !tokenFactoryId ||
-      !tokenName ||
-      !tokenSymbol ||
-      !tokenDescription
-    ) {
-      setTxResult("Please fill in all required token information");
+  // Function to create a new token with bonding curve
+  const createTokenWithCurve = async () => {
+    if (!packageId || !registryId || !treasuryCapId || !metadataId) {
+      setTxResult(
+        "Please fill in all required fields: Package ID, Registry ID, Treasury Cap ID, and Metadata ID"
+      );
       return;
     }
 
     try {
       setLoading(true);
-      setTxResult("Creating bonding curve...");
+      setTxResult("Binding token to bonding curve...");
 
-      // Create a direct transaction with a simple approach
       const tx = new Transaction();
       tx.setGasBudget(100000000);
 
-      // First, get the transaction context's address as a string
-      const sender = currentAccount?.address || "";
-
-      // Log parameters we're using for clarity
-      console.log("Using parameters:");
-      console.log("- Package ID:", packageId);
-      console.log("- Registry ID:", registryId);
-      console.log("- Token Factory ID:", tokenFactoryId);
-      console.log("- Token name:", tokenName);
-      console.log("- Token symbol:", tokenSymbol);
-      console.log("- Token description:", tokenDescription);
-
-      // Convert strings to byte arrays
-      const nameBytes = Array.from(new TextEncoder().encode(tokenName));
-      const symbolBytes = Array.from(new TextEncoder().encode(tokenSymbol));
-      const descBytes = Array.from(new TextEncoder().encode(tokenDescription));
-
-      // Use create_unique_token function which now requires token factory
       tx.moveCall({
-        target: `${packageId}::bonding_curve::create_unique_token`,
+        target: `${packageId}::bonding_curve::bind_token_to_curve`,
         arguments: [
-          tx.object(registryId),
-          tx.pure.vector("u8", nameBytes),
-          tx.pure.vector("u8", symbolBytes),
-          tx.pure.vector("u8", descBytes),
-          tx.object(tokenFactoryId),
+          tx.object(registryId), // registry: &mut Registry
+          tx.object(treasuryCapId), // treasury_cap: TreasuryCap<OTW>
+          tx.object(metadataId), // metadata: CoinMetadata<OTW>
         ],
       });
-
-      console.log("Transaction built:", tx);
 
       signAndExecuteTransaction(
         {
@@ -154,39 +139,206 @@ const BondingCurveInteraction: React.FC = () => {
     }
   };
 
+  // Function to buy tokens
+  const buyTokens = async () => {
+    if (!packageId || !bondingCurveId || !Number(buyAmount)) {
+      setTxResult("Please fill all fields for buying tokens");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setTxResult("Buying tokens...");
+
+      const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the contract)
+      const amount = Math.floor(Number(buyAmount) * 1000000000);
+
+      // Create SUI coin for payment
+      const [coin] = tx.splitCoins(tx.gas, [amount]);
+
+      // Call the buy function
+      tx.moveCall({
+        target: `${packageId}::bonding_curve::buy`,
+        typeArguments: [coinTypeArg],
+        arguments: [tx.object(bondingCurveId), coin],
+      });
+
+      signAndExecuteTransaction(
+        {
+          transaction: tx.serialize(),
+        },
+        {
+          onSuccess: (result) => {
+            handleTransactionSuccess(result);
+            refreshTokens();
+            setLoading(false);
+          },
+          onError: (error) => {
+            handleTransactionError(error);
+            setLoading(false);
+          },
+        }
+      );
+    } catch (error) {
+      handleTransactionError(error);
+      setLoading(false);
+    }
+  };
+
+  // Function to sell tokens
+  const sellTokens = async () => {
+    if (
+      !packageId ||
+      !bondingCurveId ||
+      !selectedToken ||
+      !Number(sellAmount)
+    ) {
+      setTxResult("Please fill all fields for selling tokens");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setTxResult("Selling tokens...");
+
+      const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the contract)
+      const amount = Math.floor(Number(sellAmount) * 1000000000);
+
+      // Split the selected token
+      const tokenObj = tx.object(selectedToken);
+      const [tokenToSell] = tx.splitCoins(tokenObj, [amount]);
+
+      // Call the sell function
+      tx.moveCall({
+        target: `${packageId}::bonding_curve::sell`,
+        typeArguments: [coinTypeArg],
+        arguments: [tx.object(bondingCurveId), tokenToSell],
+      });
+
+      signAndExecuteTransaction(
+        {
+          transaction: tx.serialize(),
+        },
+        {
+          onSuccess: (result) => {
+            handleTransactionSuccess(result);
+            refreshTokens();
+            setLoading(false);
+          },
+          onError: (error) => {
+            handleTransactionError(error);
+            setLoading(false);
+          },
+        }
+      );
+    } catch (error) {
+      handleTransactionError(error);
+      setLoading(false);
+    }
+  };
+
   const handleTransactionSuccess = (result: any) => {
     setTxResult(JSON.stringify(result, null, 2));
 
-    // Try to extract bonding curve ID and coin type from events
+    // Process transaction events to extract information
     try {
-      if (result.effects?.events) {
-        // Look for NewBondingCurveResult event
-        const newBondingCurveEvent = result.effects.events.find(
-          (event: SuiEvent) =>
-            event.type.includes("::bonding_curve::NewBondingCurveResult")
+      // Handle the potential different structure of the effects property
+      const events =
+        result.effects?.events ||
+        (typeof result.effects === "string"
+          ? JSON.parse(result.effects).events
+          : []);
+
+      if (events && events.length > 0) {
+        // Handle NewBondingCurveResult event
+        const newBondingCurveEvent = events.find((event: SuiEvent) =>
+          event.type.includes("::bonding_curve::NewBondingCurveResult")
         );
 
         if (newBondingCurveEvent?.parsedJson?.bonding_curve_id) {
           setBondingCurveId(newBondingCurveEvent.parsedJson.bonding_curve_id);
-          console.log(
-            "Found bonding curve ID:",
-            newBondingCurveEvent.parsedJson.bonding_curve_id
-          );
 
-          // Extract the coin type from the event
+          // Extract coin type from event
           if (newBondingCurveEvent?.parsedJson?.coin_type) {
-            // Convert to proper coin type format
             const rawType = newBondingCurveEvent.parsedJson.coin_type;
-            console.log("Raw coin type:", rawType);
-
-            // Extract the relevant part for frontend use
             const typeParts = rawType.split("::");
             if (typeParts.length === 3) {
-              const coinTypeFormatted = `${packageId}::${typeParts[2]}`;
+              const coinTypeFormatted = `${typeParts[0]}::${typeParts[1]}::${typeParts[2]}`;
               setCoinTypeArg(coinTypeFormatted);
-              console.log("Set coin type to:", coinTypeFormatted);
             }
           }
+        }
+
+        // Handle BuyResult event
+        const buyEvent = events.find((event: SuiEvent) =>
+          event.type.includes("::bonding_curve::BuyResult")
+        );
+
+        if (buyEvent?.parsedJson) {
+          // Update UI with buy information if available
+          if (
+            buyEvent.parsedJson.sui_amount &&
+            buyEvent.parsedJson.tokens_minted
+          ) {
+            setTxResult(
+              `Successfully bought ${
+                Number(buyEvent.parsedJson.tokens_minted) / 1000000000
+              } tokens for ${
+                Number(buyEvent.parsedJson.sui_amount) / 1000000000
+              } SUI`
+            );
+          }
+        }
+
+        // Handle SellResult event
+        const sellEvent = events.find((event: SuiEvent) =>
+          event.type.includes("::bonding_curve::SellResult")
+        );
+
+        if (sellEvent?.parsedJson) {
+          // Update UI with sell information if available
+          if (
+            sellEvent.parsedJson.token_amount &&
+            sellEvent.parsedJson.sui_received
+          ) {
+            setTxResult(
+              `Successfully sold ${
+                Number(sellEvent.parsedJson.token_amount) / 1000000000
+              } tokens for ${
+                Number(sellEvent.parsedJson.sui_received) / 1000000000
+              } SUI`
+            );
+          }
+        }
+
+        // Handle TransitionToAMMResult event
+        const transitionEvent = events.find((event: SuiEvent) =>
+          event.type.includes("::bonding_curve::TransitionToAMMResult")
+        );
+
+        if (transitionEvent?.parsedJson) {
+          setHasTransitioned(true);
+          if (transitionEvent.parsedJson.virtual_sui_reserves) {
+            setVirtualSuiReserves(
+              transitionEvent.parsedJson.virtual_sui_reserves
+            );
+          }
+          if (transitionEvent.parsedJson.virtual_token_reserves) {
+            setVirtualTokenReserves(
+              transitionEvent.parsedJson.virtual_token_reserves
+            );
+          }
+          setTxResult(
+            `Bonding curve has transitioned to AMM mode with ${
+              Number(transitionEvent.parsedJson.virtual_sui_reserves) /
+              1000000000
+            } SUI and ${
+              Number(transitionEvent.parsedJson.virtual_token_reserves) /
+              1000000000
+            } tokens`
+          );
         }
       }
     } catch (error) {
@@ -207,126 +359,12 @@ const BondingCurveInteraction: React.FC = () => {
       errorMessage = String(error);
     }
 
-    // Try to extract SUI error details
-    try {
-      const errorJson = JSON.parse(errorMessage);
-      if (errorJson.data && errorJson.data.errors) {
-        errorMessage = errorJson.data.errors
-          .map((e: any) => e.message || JSON.stringify(e))
-          .join(", ");
-      }
-    } catch (e) {
-      // Not a JSON error, use the original message
-    }
-
     setTxResult(`Error: ${errorMessage}`);
   };
 
-  // Function to buy tokens
-  const buyTokens = async () => {
-    if (!packageId || !bondingCurveId || !Number(buyAmount)) {
-      setTxResult("Please fill all fields for buying tokens");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setTxResult("Buying tokens...");
-
-      const tx = new Transaction();
-      // Convert to 9 decimals (consistent with the updated contract)
-      const amount = Math.floor(Number(buyAmount) * 1000000000);
-
-      // Create SUI coin for payment
-      const [coin] = tx.splitCoins(tx.gas, [amount]);
-
-      // Call the buy function
-      tx.moveCall({
-        target: `${packageId}::bonding_curve::buy`,
-        typeArguments: [coinTypeArg],
-        arguments: [tx.object(bondingCurveId), coin],
-      });
-
-      signAndExecuteTransaction(
-        {
-          transaction: tx.serialize(),
-        },
-        {
-          onSuccess: (result) => {
-            setTxResult(JSON.stringify(result, null, 2));
-            refreshTokens(); // Refresh token list after successful purchase
-            setLoading(false);
-          },
-          onError: (error) => {
-            handleTransactionError(error);
-            setLoading(false);
-          },
-        }
-      );
-    } catch (error) {
-      handleTransactionError(error);
-      setLoading(false);
-    }
-  };
-
-  // Function to sell tokens
-  const sellTokens = async () => {
-    if (
-      !packageId ||
-      !bondingCurveId ||
-      !Number(sellAmount) ||
-      !selectedToken
-    ) {
-      setTxResult("Please fill all fields for selling tokens");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setTxResult("Selling tokens...");
-
-      const tx = new Transaction();
-      // Convert to 9 decimals (consistent with the updated contract)
-      const amount = Math.floor(Number(sellAmount) * 1000000000);
-
-      // Use the selected token object ID
-      // Create a coin object with the amount to sell
-      const [tokenCoin] = tx.splitCoins(tx.object(selectedToken), [amount]);
-
-      // Call the sell function
-      tx.moveCall({
-        target: `${packageId}::bonding_curve::sell`,
-        typeArguments: [coinTypeArg],
-        arguments: [tx.object(bondingCurveId), tokenCoin],
-      });
-
-      signAndExecuteTransaction(
-        {
-          transaction: tx.serialize(),
-        },
-        {
-          onSuccess: (result) => {
-            setTxResult(JSON.stringify(result, null, 2));
-            refreshTokens(); // Refresh token list after successful sale
-            setLoading(false);
-          },
-          onError: (error) => {
-            handleTransactionError(error);
-            setLoading(false);
-          },
-        }
-      );
-    } catch (error) {
-      handleTransactionError(error);
-      setLoading(false);
-    }
-  };
-
-  // Function to refresh token list
   const refreshTokens = async () => {
     if (currentAccount && coinTypeArg) {
       try {
-        setLoading(true);
         const tokens = await getOwnedTokens(
           currentAccount.address,
           coinTypeArg
@@ -335,276 +373,317 @@ const BondingCurveInteraction: React.FC = () => {
         if (tokens.length > 0) {
           setSelectedToken(tokens[0].id);
         }
-        setTxResult("Token list refreshed");
-        setLoading(false);
       } catch (error) {
-        setTxResult(
-          `Error refreshing tokens: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        setLoading(false);
+        console.error("Error refreshing tokens:", error);
       }
     }
   };
 
-  if (!currentAccount) {
-    return <div>Please connect your wallet first</div>;
-  }
+  // Format token balance for display
+  const formatBalance = (balance: bigint): string => {
+    return (Number(balance) / 1000000000).toFixed(9);
+  };
 
   return (
-    <div>
-      <h2>Bonding Curve Interaction</h2>
-
-      <div
-        style={{
-          marginBottom: "20px",
-          padding: "15px",
-          border: "1px solid #ddd",
-          borderRadius: "5px",
-        }}
-      >
-        <h3>Configuration</h3>
-        <div>
-          <label htmlFor="packageId">Package ID:</label>
-          <input
-            id="packageId"
-            type="text"
-            value={packageId}
-            onChange={(e) => setPackageId(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-      </div>
-
-      <div
-        style={{
-          marginBottom: "20px",
-          padding: "15px",
-          border: "1px solid #ddd",
-          borderRadius: "5px",
-        }}
-      >
-        <h3>Create New Bonding Curve</h3>
-        <div>
-          <label htmlFor="registryId">Registry ID:</label>
-          <input
-            id="registryId"
-            type="text"
-            value={registryId}
-            onChange={(e) => setRegistryId(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div>
-          <label htmlFor="tokenFactoryId">Token Factory ID:</label>
-          <input
-            id="tokenFactoryId"
-            type="text"
-            value={tokenFactoryId}
-            onChange={(e) => setTokenFactoryId(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div>
-          <label htmlFor="tokenName">Token Name:</label>
-          <input
-            id="tokenName"
-            type="text"
-            value={tokenName}
-            onChange={(e) => setTokenName(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div>
-          <label htmlFor="tokenSymbol">Token Symbol:</label>
-          <input
-            id="tokenSymbol"
-            type="text"
-            value={tokenSymbol}
-            onChange={(e) => setTokenSymbol(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div>
-          <label htmlFor="tokenDescription">Token Description:</label>
-          <input
-            id="tokenDescription"
-            type="text"
-            value={tokenDescription}
-            onChange={(e) => setTokenDescription(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <button
-          onClick={createBondingCurve}
-          disabled={loading}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: loading ? "#ccc" : "#0070f3",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "Processing..." : "Create Token & Bonding Curve"}
-        </button>
-      </div>
-
-      <div
-        style={{
-          marginBottom: "20px",
-          padding: "15px",
-          border: "1px solid #ddd",
-          borderRadius: "5px",
-        }}
-      >
-        <h3>Interact with Existing Bonding Curve</h3>
-        <div>
-          <label htmlFor="bondingCurveId">Bonding Curve ID:</label>
-          <input
-            id="bondingCurveId"
-            type="text"
-            value={bondingCurveId}
-            onChange={(e) => setBondingCurveId(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div>
-          <label htmlFor="coinTypeArg">Coin Type (e.g. 0x...::xxx):</label>
-          <input
-            id="coinTypeArg"
-            type="text"
-            value={coinTypeArg}
-            onChange={(e) => setCoinTypeArg(e.target.value)}
-            style={{ width: "100%", marginBottom: "10px" }}
-          />
-        </div>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="buyAmount">Buy Amount (SUI):</label>
+    <div className="container mx-auto p-4">
+      <div className="mb-8">
+        <h2 className="text-xl font-bold mb-4">Contract Configuration</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block mb-2">Package ID</label>
             <input
-              id="buyAmount"
-              type="number"
-              value={buyAmount}
-              onChange={(e) => setBuyAmount(e.target.value)}
-              style={{ width: "100%" }}
+              type="text"
+              value={packageId}
+              onChange={(e) => setPackageId(e.target.value)}
+              className="w-full p-2 border rounded"
+              placeholder="Package ID"
             />
+          </div>
+          <div>
+            <label className="block mb-2">Registry ID</label>
+            <input
+              type="text"
+              value={registryId}
+              onChange={(e) => setRegistryId(e.target.value)}
+              className="w-full p-2 border rounded"
+              placeholder="Registry ID"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <div className="flex mb-4">
+          <button
+            className={`mr-2 px-4 py-2 rounded ${
+              transactionType === "create"
+                ? "bg-blue-500 text-white"
+                : "bg-gray-200"
+            }`}
+            onClick={() => setTransactionType("create")}
+          >
+            Create Token
+          </button>
+          <button
+            className={`mr-2 px-4 py-2 rounded ${
+              transactionType === "buy"
+                ? "bg-blue-500 text-white"
+                : "bg-gray-200"
+            }`}
+            onClick={() => setTransactionType("buy")}
+          >
+            Buy Tokens
+          </button>
+          <button
+            className={`px-4 py-2 rounded ${
+              transactionType === "sell"
+                ? "bg-blue-500 text-white"
+                : "bg-gray-200"
+            }`}
+            onClick={() => setTransactionType("sell")}
+          >
+            Sell Tokens
+          </button>
+        </div>
+
+        {transactionType === "create" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">
+              Bind Token to Bonding Curve
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block mb-2">Treasury Cap ID</label>
+                <input
+                  type="text"
+                  value={treasuryCapId}
+                  onChange={(e) => setTreasuryCapId(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Treasury Cap ID"
+                />
+              </div>
+              <div>
+                <label className="block mb-2">Metadata ID</label>
+                <input
+                  type="text"
+                  value={metadataId}
+                  onChange={(e) => setMetadataId(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Metadata ID"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="block mb-2">Token Name (Display Only)</label>
+                <input
+                  type="text"
+                  value={tokenName}
+                  onChange={(e) => setTokenName(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Token Name"
+                />
+              </div>
+              <div>
+                <label className="block mb-2">
+                  Token Symbol (Display Only)
+                </label>
+                <input
+                  type="text"
+                  value={tokenSymbol}
+                  onChange={(e) => setTokenSymbol(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Token Symbol"
+                />
+              </div>
+              <div>
+                <label className="block mb-2">
+                  Token Description (Display Only)
+                </label>
+                <input
+                  type="text"
+                  value={tokenDescription}
+                  onChange={(e) => setTokenDescription(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Token Description"
+                />
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Note: Token name, symbol, and description are for display purposes
+              only. The actual values are already set in the metadata object.
+            </p>
             <button
-              onClick={buyTokens}
+              onClick={createTokenWithCurve}
               disabled={loading}
-              style={{
-                padding: "5px 10px",
-                backgroundColor: loading ? "#ccc" : "#0070f3",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: loading ? "not-allowed" : "pointer",
-                marginTop: "5px",
-              }}
+              className="bg-green-500 text-white px-4 py-2 rounded"
             >
-              {loading ? "Processing..." : "Buy Tokens"}
+              {loading ? "Creating..." : "Bind Token to Curve"}
             </button>
           </div>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="sellAmount">Sell Amount (Tokens):</label>
-            <input
-              id="sellAmount"
-              type="number"
-              value={sellAmount}
-              onChange={(e) => setSellAmount(e.target.value)}
-              style={{ width: "100%" }}
-            />
-            {ownedTokens.length > 0 && (
+        )}
+
+        {transactionType === "buy" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Buy Tokens</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block mb-2">Bonding Curve ID</label>
+                <input
+                  type="text"
+                  value={bondingCurveId}
+                  onChange={(e) => setBondingCurveId(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Bonding Curve ID"
+                />
+              </div>
+              <div>
+                <label className="block mb-2">Coin Type</label>
+                <input
+                  type="text"
+                  value={coinTypeArg}
+                  onChange={(e) => setCoinTypeArg(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Coin Type"
+                />
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2">Amount of SUI to spend</label>
+              <input
+                type="number"
+                value={buyAmount}
+                onChange={(e) => setBuyAmount(e.target.value)}
+                className="w-full p-2 border rounded"
+                placeholder="SUI Amount"
+                step="0.000000001"
+                min="0"
+              />
+            </div>
+            <button
+              onClick={buyTokens}
+              disabled={loading || hasTransitioned}
+              className="bg-green-500 text-white px-4 py-2 rounded"
+            >
+              {loading ? "Buying..." : "Buy Tokens"}
+            </button>
+            {hasTransitioned && (
+              <p className="text-red-500 mt-2">
+                This bonding curve has transitioned to AMM mode and buying is no
+                longer available.
+              </p>
+            )}
+          </div>
+        )}
+
+        {transactionType === "sell" && (
+          <div>
+            <h2 className="text-xl font-bold mb-4">Sell Tokens</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block mb-2">Bonding Curve ID</label>
+                <input
+                  type="text"
+                  value={bondingCurveId}
+                  onChange={(e) => setBondingCurveId(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Bonding Curve ID"
+                />
+              </div>
+              <div>
+                <label className="block mb-2">Coin Type</label>
+                <input
+                  type="text"
+                  value={coinTypeArg}
+                  onChange={(e) => setCoinTypeArg(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Coin Type"
+                />
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2">Select Token</label>
               <select
                 value={selectedToken}
                 onChange={(e) => setSelectedToken(e.target.value)}
-                style={{ width: "100%", marginTop: "5px" }}
+                className="w-full p-2 border rounded"
               >
                 {ownedTokens.map((token) => (
                   <option key={token.id} value={token.id}>
-                    {token.id.substring(0, 8)}... (
-                    {Number(token.balance) / 1000000000} tokens)
+                    {token.id} ({formatBalance(token.balance)})
                   </option>
                 ))}
               </select>
-            )}
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2">Amount of tokens to sell</label>
+              <input
+                type="number"
+                value={sellAmount}
+                onChange={(e) => setSellAmount(e.target.value)}
+                className="w-full p-2 border rounded"
+                placeholder="Token Amount"
+                step="0.000000001"
+                min="0"
+              />
+            </div>
             <button
               onClick={sellTokens}
-              disabled={loading || ownedTokens.length === 0}
-              style={{
-                padding: "5px 10px",
-                backgroundColor:
-                  loading || ownedTokens.length === 0 ? "#ccc" : "#0070f3",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor:
-                  loading || ownedTokens.length === 0
-                    ? "not-allowed"
-                    : "pointer",
-                marginTop: "5px",
-              }}
+              disabled={loading || hasTransitioned}
+              className="bg-green-500 text-white px-4 py-2 rounded"
             >
-              {loading ? "Processing..." : "Sell Tokens"}
+              {loading ? "Selling..." : "Sell Tokens"}
             </button>
+            {hasTransitioned && (
+              <p className="text-red-500 mt-2">
+                This bonding curve has transitioned to AMM mode and selling is
+                no longer available.
+              </p>
+            )}
           </div>
-        </div>
-        <button
-          onClick={refreshTokens}
-          disabled={loading || !coinTypeArg}
-          style={{
-            padding: "5px 10px",
-            backgroundColor: loading || !coinTypeArg ? "#ccc" : "#0070f3",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: loading || !coinTypeArg ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "Processing..." : "Refresh Token List"}
-        </button>
-      </div>
-
-      <div
-        style={{
-          marginBottom: "20px",
-          padding: "15px",
-          border: "1px solid #ddd",
-          borderRadius: "5px",
-        }}
-      >
-        <h3>Owned Tokens</h3>
-        {ownedTokens.length > 0 ? (
-          <ul>
-            {ownedTokens.map((token) => (
-              <li key={token.id}>
-                ID: {token.id.substring(0, 12)}...{" "}
-                <strong>
-                  Balance: {Number(token.balance) / 1000000000} tokens
-                </strong>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No tokens found. Buy some tokens first!</p>
         )}
       </div>
 
-      <div
-        style={{
-          marginBottom: "20px",
-          padding: "15px",
-          border: "1px solid #ddd",
-          borderRadius: "5px",
-          maxHeight: "300px",
-          overflow: "auto",
-        }}
-      >
-        <h3>Transaction Result</h3>
-        <pre style={{ whiteSpace: "pre-wrap" }}>{txResult}</pre>
-      </div>
+      {ownedTokens.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xl font-bold mb-4">Your Tokens</h2>
+          <button
+            onClick={refreshTokens}
+            className="bg-blue-500 text-white px-4 py-2 rounded mb-4"
+          >
+            Refresh Tokens
+          </button>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border p-2 text-left">Token ID</th>
+                <th className="border p-2 text-left">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ownedTokens.map((token) => (
+                <tr key={token.id}>
+                  <td className="border p-2 text-left font-mono text-sm">
+                    {token.id}
+                  </td>
+                  <td className="border p-2 text-left">
+                    {formatBalance(token.balance)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {txResult && (
+        <div className="mb-8">
+          <h2 className="text-xl font-bold mb-4">Transaction Result</h2>
+          <pre className="bg-gray-100 p-4 rounded overflow-auto max-h-96">
+            {txResult}
+          </pre>
+        </div>
+      )}
     </div>
   );
 };

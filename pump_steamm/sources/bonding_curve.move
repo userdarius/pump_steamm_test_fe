@@ -98,25 +98,12 @@ public fun create_bonding_curve<T: drop>(
 }
 
 /// Helper function to create a bonding curve for a token using a otw
-/// This should be called from the init function of a token module
-public fun create_token_with_curve<OTW: drop>(
+public fun bind_token_to_curve<OTW: drop>(
     registry: &mut Registry,
-    witness: OTW, 
-    name: vector<u8>,
-    symbol: vector<u8>,
-    description: vector<u8>,
+    treasury_cap: TreasuryCap<OTW>,
+    metadata: CoinMetadata<OTW>,
     ctx: &mut TxContext
 ) {
-    let (treasury_cap, metadata) = coin::create_currency(
-        witness,
-        9, 
-        name,
-        symbol,
-        description,
-        option::none(),
-        ctx,
-    );
-    
     let bonding_curve = create_bonding_curve(
         registry,
         treasury_cap,
