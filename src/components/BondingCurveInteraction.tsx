@@ -40,7 +40,7 @@ const BondingCurveInteraction: React.FC = () => {
 
   // State for contract interaction
   const [packageId, setPackageId] = useState(
-    "0x4c80d97de0920eed5b2449b9805c70935c4254e60a58f9e26304c953f6cdd7f8"
+    "0xfe67289f3d0176e30f2cde3de83b7e42aeccf2a18b79f1d36c3b41dd983fcf41"
   );
   const [registryId, setRegistryId] = useState("");
   const [bondingCurveId, setBondingCurveId] = useState("");
@@ -111,10 +111,13 @@ const BondingCurveInteraction: React.FC = () => {
 
       tx.moveCall({
         target: `${packageId}::bonding_curve::bind_token_to_curve`,
+        typeArguments: [
+          "0x0db1ec658bf451e0c1cf4fb11714d00e7981db93dd0e5c055725f4f08b31b576::test_token::TEST_TOKEN",
+        ],
         arguments: [
           tx.object(registryId), // registry: &mut Registry
-          tx.object(treasuryCapId), // treasury_cap: TreasuryCap<OTW>
-          tx.object(metadataId), // metadata: CoinMetadata<OTW>
+          tx.object(treasuryCapId), // treasury_cap: TreasuryCap<T>
+          tx.object(metadataId), // metadata: CoinMetadata<T>
         ],
       });
 
@@ -195,6 +198,12 @@ const BondingCurveInteraction: React.FC = () => {
       !Number(sellAmount)
     ) {
       setTxResult("Please fill all fields for selling tokens");
+      return;
+    }
+
+    // Ensure the coinTypeArg is set before selling
+    if (!coinTypeArg) {
+      setTxResult("Coin type is not set. Please enter a valid coin type.");
       return;
     }
 
@@ -365,17 +374,31 @@ const BondingCurveInteraction: React.FC = () => {
   const refreshTokens = async () => {
     if (currentAccount && coinTypeArg) {
       try {
+        console.log("Refreshing tokens with coin type:", coinTypeArg);
         const tokens = await getOwnedTokens(
           currentAccount.address,
           coinTypeArg
         );
+        console.log("Found tokens:", tokens);
         setOwnedTokens(tokens);
         if (tokens.length > 0) {
           setSelectedToken(tokens[0].id);
+        } else {
+          console.log(
+            "No tokens found for address",
+            currentAccount.address,
+            "with coin type",
+            coinTypeArg
+          );
         }
       } catch (error) {
         console.error("Error refreshing tokens:", error);
       }
+    } else {
+      console.log(
+        "Cannot refresh tokens: ",
+        currentAccount ? "Missing coin type" : "Missing account"
+      );
     }
   };
 
@@ -385,303 +408,685 @@ const BondingCurveInteraction: React.FC = () => {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="mb-8">
-        <h2 className="text-xl font-bold mb-4">Contract Configuration</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block mb-2">Package ID</label>
-            <input
-              type="text"
-              value={packageId}
-              onChange={(e) => setPackageId(e.target.value)}
-              className="w-full p-2 border rounded"
-              placeholder="Package ID"
-            />
-          </div>
-          <div>
-            <label className="block mb-2">Registry ID</label>
-            <input
-              type="text"
-              value={registryId}
-              onChange={(e) => setRegistryId(e.target.value)}
-              className="w-full p-2 border rounded"
-              placeholder="Registry ID"
-            />
+    <div
+      style={{
+        maxWidth: "800px",
+        margin: "0 auto",
+        padding: "20px",
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+        borderRadius: "8px",
+        backgroundColor: "white",
+      }}
+    >
+      <h2
+        style={{
+          fontSize: "24px",
+          fontWeight: "bold",
+          textAlign: "center",
+          marginBottom: "20px",
+        }}
+      >
+        Bonding Curve Interaction
+      </h2>
+
+      {/* Transaction result display */}
+      {txResult && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "10px",
+            backgroundColor: "#f7f7f7",
+            borderRadius: "6px",
+            textAlign: "center",
+          }}
+        >
+          <p>{txResult}</p>
+        </div>
+      )}
+
+      {/* Bonding Curve Stats */}
+      {(virtualSuiReserves !== "0" || virtualTokenReserves !== "0") && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "15px",
+            backgroundColor: "#ebf5ff",
+            borderRadius: "6px",
+          }}
+        >
+          <h3
+            style={{
+              fontSize: "18px",
+              fontWeight: "600",
+              textAlign: "center",
+              marginBottom: "10px",
+            }}
+          >
+            Bonding Curve Stats
+          </h3>
+          <div
+            style={{ display: "flex", justifyContent: "center", gap: "20px" }}
+          >
+            <p>Virtual SUI Reserves: {virtualSuiReserves} SUI</p>
+            <p>Virtual Token Reserves: {virtualTokenReserves} Tokens</p>
           </div>
         </div>
+      )}
+
+      {/* Transaction Type Selector */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "10px",
+          marginBottom: "20px",
+        }}
+      >
+        <button
+          style={{
+            padding: "8px 16px",
+            borderRadius: "4px",
+            backgroundColor:
+              transactionType === "create" ? "#2563eb" : "#e5e7eb",
+            color: transactionType === "create" ? "white" : "black",
+            border: "none",
+            cursor: "pointer",
+          }}
+          onClick={() => {
+            setTransactionType("create");
+          }}
+        >
+          Create Token
+        </button>
+        <button
+          style={{
+            padding: "8px 16px",
+            borderRadius: "4px",
+            backgroundColor: transactionType === "buy" ? "#2563eb" : "#e5e7eb",
+            color: transactionType === "buy" ? "white" : "black",
+            border: "none",
+            cursor: "pointer",
+          }}
+          onClick={() => {
+            setTransactionType("buy");
+          }}
+        >
+          Buy Tokens
+        </button>
+        <button
+          style={{
+            padding: "8px 16px",
+            borderRadius: "4px",
+            backgroundColor: transactionType === "sell" ? "#2563eb" : "#e5e7eb",
+            color: transactionType === "sell" ? "white" : "black",
+            border: "none",
+            cursor: "pointer",
+          }}
+          onClick={() => {
+            setTransactionType("sell");
+            refreshTokens(); // Refresh tokens when switching to sell mode
+          }}
+        >
+          Sell Tokens
+        </button>
       </div>
 
-      <div className="mb-8">
-        <div className="flex mb-4">
-          <button
-            className={`mr-2 px-4 py-2 rounded ${
-              transactionType === "create"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-200"
-            }`}
-            onClick={() => setTransactionType("create")}
+      {/* Create Token Form */}
+      {transactionType === "create" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <h3
+            style={{
+              fontSize: "18px",
+              fontWeight: "600",
+              textAlign: "center",
+              marginBottom: "10px",
+            }}
           >
             Create Token
-          </button>
-          <button
-            className={`mr-2 px-4 py-2 rounded ${
-              transactionType === "buy"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-200"
-            }`}
-            onClick={() => setTransactionType("buy")}
-          >
-            Buy Tokens
-          </button>
-          <button
-            className={`px-4 py-2 rounded ${
-              transactionType === "sell"
-                ? "bg-blue-500 text-white"
-                : "bg-gray-200"
-            }`}
-            onClick={() => setTransactionType("sell")}
-          >
-            Sell Tokens
-          </button>
-        </div>
+          </h3>
 
-        {transactionType === "create" && (
-          <div>
-            <h2 className="text-xl font-bold mb-4">
-              Bind Token to Bonding Curve
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block mb-2">Treasury Cap ID</label>
-                <input
-                  type="text"
-                  value={treasuryCapId}
-                  onChange={(e) => setTreasuryCapId(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Treasury Cap ID"
-                />
-              </div>
-              <div>
-                <label className="block mb-2">Metadata ID</label>
-                <input
-                  type="text"
-                  value={metadataId}
-                  onChange={(e) => setMetadataId(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Metadata ID"
-                />
-              </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Package ID
+              </label>
+              <input
+                type="text"
+                value={packageId}
+                onChange={(e) => setPackageId(e.target.value)}
+                placeholder="Package ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block mb-2">Token Name (Display Only)</label>
-                <input
-                  type="text"
-                  value={tokenName}
-                  onChange={(e) => setTokenName(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Token Name"
-                />
-              </div>
-              <div>
-                <label className="block mb-2">
-                  Token Symbol (Display Only)
-                </label>
-                <input
-                  type="text"
-                  value={tokenSymbol}
-                  onChange={(e) => setTokenSymbol(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Token Symbol"
-                />
-              </div>
-              <div>
-                <label className="block mb-2">
-                  Token Description (Display Only)
-                </label>
-                <input
-                  type="text"
-                  value={tokenDescription}
-                  onChange={(e) => setTokenDescription(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Token Description"
-                />
-              </div>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Registry ID
+              </label>
+              <input
+                type="text"
+                value={registryId}
+                onChange={(e) => setRegistryId(e.target.value)}
+                placeholder="Registry ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
             </div>
-            <p className="text-sm text-gray-600 mb-4">
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Treasury Cap ID
+              </label>
+              <input
+                type="text"
+                value={treasuryCapId}
+                onChange={(e) => setTreasuryCapId(e.target.value)}
+                placeholder="Treasury Cap ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Metadata ID
+              </label>
+              <input
+                type="text"
+                value={metadataId}
+                onChange={(e) => setMetadataId(e.target.value)}
+                placeholder="Metadata ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Token Name (Display Only)
+              </label>
+              <input
+                type="text"
+                value={tokenName}
+                onChange={(e) => setTokenName(e.target.value)}
+                placeholder="Token Name"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Token Symbol (Display Only)
+              </label>
+              <input
+                type="text"
+                value={tokenSymbol}
+                onChange={(e) => setTokenSymbol(e.target.value)}
+                placeholder="Token Symbol"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Token Description (Display Only)
+              </label>
+              <input
+                type="text"
+                value={tokenDescription}
+                onChange={(e) => setTokenDescription(e.target.value)}
+                placeholder="Token Description"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ textAlign: "center", fontSize: "14px", color: "#666" }}>
+            <p>
               Note: Token name, symbol, and description are for display purposes
               only. The actual values are already set in the metadata object.
             </p>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "center" }}>
             <button
               onClick={createTokenWithCurve}
               disabled={loading}
-              className="bg-green-500 text-white px-4 py-2 rounded"
+              style={{
+                padding: "10px 20px",
+                backgroundColor: loading ? "#9ca3af" : "#2563eb",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
             >
               {loading ? "Creating..." : "Bind Token to Curve"}
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {transactionType === "buy" && (
-          <div>
-            <h2 className="text-xl font-bold mb-4">Buy Tokens</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block mb-2">Bonding Curve ID</label>
-                <input
-                  type="text"
-                  value={bondingCurveId}
-                  onChange={(e) => setBondingCurveId(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Bonding Curve ID"
-                />
-              </div>
-              <div>
-                <label className="block mb-2">Coin Type</label>
-                <input
-                  type="text"
-                  value={coinTypeArg}
-                  onChange={(e) => setCoinTypeArg(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Coin Type"
-                />
-              </div>
+      {/* Buy Tokens Form */}
+      {transactionType === "buy" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <h3
+            style={{
+              fontSize: "18px",
+              fontWeight: "600",
+              textAlign: "center",
+              marginBottom: "10px",
+            }}
+          >
+            Buy Tokens
+          </h3>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Bonding Curve ID
+              </label>
+              <input
+                type="text"
+                value={bondingCurveId}
+                onChange={(e) => setBondingCurveId(e.target.value)}
+                placeholder="Bonding Curve ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
             </div>
-            <div className="mb-4">
-              <label className="block mb-2">Amount of SUI to spend</label>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Coin Type
+              </label>
+              <input
+                type="text"
+                value={coinTypeArg}
+                onChange={(e) => setCoinTypeArg(e.target.value)}
+                placeholder="Coin Type"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ maxWidth: "400px", margin: "0 auto" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "5px",
+                fontSize: "14px",
+                fontWeight: "500",
+              }}
+            >
+              Amount of SUI to spend
+            </label>
+            <div style={{ display: "flex" }}>
               <input
                 type="number"
                 value={buyAmount}
                 onChange={(e) => setBuyAmount(e.target.value)}
-                className="w-full p-2 border rounded"
                 placeholder="SUI Amount"
                 step="0.000000001"
                 min="0"
+                style={{
+                  flexGrow: 1,
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRight: "none",
+                  borderRadius: "4px 0 0 4px",
+                }}
               />
+              <span
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#e5e7eb",
+                  borderRadius: "0 4px 4px 0",
+                }}
+              >
+                SUI
+              </span>
             </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "center" }}>
             <button
               onClick={buyTokens}
               disabled={loading || hasTransitioned}
-              className="bg-green-500 text-white px-4 py-2 rounded"
+              style={{
+                padding: "10px 20px",
+                backgroundColor:
+                  loading || hasTransitioned ? "#9ca3af" : "#2563eb",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: loading || hasTransitioned ? "not-allowed" : "pointer",
+              }}
             >
               {loading ? "Buying..." : "Buy Tokens"}
             </button>
-            {hasTransitioned && (
-              <p className="text-red-500 mt-2">
+          </div>
+
+          {hasTransitioned && (
+            <div style={{ textAlign: "center", color: "#d97706" }}>
+              <p>
                 This bonding curve has transitioned to AMM mode and buying is no
                 longer available.
               </p>
-            )}
-          </div>
-        )}
-
-        {transactionType === "sell" && (
-          <div>
-            <h2 className="text-xl font-bold mb-4">Sell Tokens</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block mb-2">Bonding Curve ID</label>
-                <input
-                  type="text"
-                  value={bondingCurveId}
-                  onChange={(e) => setBondingCurveId(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Bonding Curve ID"
-                />
-              </div>
-              <div>
-                <label className="block mb-2">Coin Type</label>
-                <input
-                  type="text"
-                  value={coinTypeArg}
-                  onChange={(e) => setCoinTypeArg(e.target.value)}
-                  className="w-full p-2 border rounded"
-                  placeholder="Coin Type"
-                />
-              </div>
             </div>
-            <div className="mb-4">
-              <label className="block mb-2">Select Token</label>
+          )}
+        </div>
+      )}
+
+      {/* Sell Tokens Form */}
+      {transactionType === "sell" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <h3
+            style={{
+              fontSize: "18px",
+              fontWeight: "600",
+              textAlign: "center",
+              marginBottom: "10px",
+            }}
+          >
+            Sell Tokens
+          </h3>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Bonding Curve ID
+              </label>
+              <input
+                type="text"
+                value={bondingCurveId}
+                onChange={(e) => setBondingCurveId(e.target.value)}
+                placeholder="Bonding Curve ID"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "5px",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                }}
+              >
+                Coin Type
+              </label>
+              <input
+                type="text"
+                value={coinTypeArg}
+                onChange={(e) => {
+                  setCoinTypeArg(e.target.value);
+                  // Schedule a refresh after the state updates
+                  setTimeout(refreshTokens, 100);
+                }}
+                placeholder="Coin Type"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ maxWidth: "400px", margin: "0 auto" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "5px",
+                fontSize: "14px",
+                fontWeight: "500",
+                textAlign: "center",
+              }}
+            >
+              Your Tokens ({ownedTokens.length})
+            </label>
+            {ownedTokens.length > 0 ? (
               <select
                 value={selectedToken}
                 onChange={(e) => setSelectedToken(e.target.value)}
-                className="w-full p-2 border rounded"
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                }}
               >
                 {ownedTokens.map((token) => (
                   <option key={token.id} value={token.id}>
-                    {token.id} ({formatBalance(token.balance)})
+                    {token.id} - Balance: {formatBalance(token.balance)}
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="mb-4">
-              <label className="block mb-2">Amount of tokens to sell</label>
+            ) : (
+              <p style={{ textAlign: "center", color: "#666" }}>
+                No tokens found of type {coinTypeArg || "[Type not specified]"}
+              </p>
+            )}
+          </div>
+
+          <div style={{ maxWidth: "400px", margin: "0 auto" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "5px",
+                fontSize: "14px",
+                fontWeight: "500",
+              }}
+            >
+              Amount of Tokens to Sell
+            </label>
+            <div style={{ display: "flex" }}>
               <input
                 type="number"
                 value={sellAmount}
                 onChange={(e) => setSellAmount(e.target.value)}
-                className="w-full p-2 border rounded"
                 placeholder="Token Amount"
                 step="0.000000001"
                 min="0"
+                style={{
+                  flexGrow: 1,
+                  padding: "8px",
+                  border: "1px solid #ddd",
+                  borderRight: "none",
+                  borderRadius: "4px 0 0 4px",
+                }}
               />
+              <span
+                style={{
+                  padding: "8px 16px",
+                  backgroundColor: "#e5e7eb",
+                  borderRadius: "0 4px 4px 0",
+                }}
+              >
+                Tokens
+              </span>
             </div>
+          </div>
+
+          <div
+            style={{ display: "flex", justifyContent: "center", gap: "10px" }}
+          >
             <button
               onClick={sellTokens}
-              disabled={loading || hasTransitioned}
-              className="bg-green-500 text-white px-4 py-2 rounded"
+              disabled={loading}
+              style={{
+                padding: "10px 20px",
+                backgroundColor: loading ? "#9ca3af" : "#2563eb",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
             >
               {loading ? "Selling..." : "Sell Tokens"}
             </button>
-            {hasTransitioned && (
-              <p className="text-red-500 mt-2">
-                This bonding curve has transitioned to AMM mode and selling is
-                no longer available.
-              </p>
-            )}
+
+            <button
+              onClick={refreshTokens}
+              style={{
+                padding: "10px 20px",
+                backgroundColor: "#e5e7eb",
+                color: "black",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              Refresh Token List
+            </button>
           </div>
-        )}
-      </div>
-
-      {ownedTokens.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-xl font-bold mb-4">Your Tokens</h2>
-          <button
-            onClick={refreshTokens}
-            className="bg-blue-500 text-white px-4 py-2 rounded mb-4"
-          >
-            Refresh Tokens
-          </button>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="border p-2 text-left">Token ID</th>
-                <th className="border p-2 text-left">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ownedTokens.map((token) => (
-                <tr key={token.id}>
-                  <td className="border p-2 text-left font-mono text-sm">
-                    {token.id}
-                  </td>
-                  <td className="border p-2 text-left">
-                    {formatBalance(token.balance)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {txResult && (
-        <div className="mb-8">
-          <h2 className="text-xl font-bold mb-4">Transaction Result</h2>
-          <pre className="bg-gray-100 p-4 rounded overflow-auto max-h-96">
-            {txResult}
-          </pre>
         </div>
       )}
     </div>

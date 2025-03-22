@@ -4,27 +4,76 @@ import BondingCurveInteraction from "./components/BondingCurveInteraction";
 
 const App: React.FC = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
-      <header className="bg-blue-600 text-white p-4 shadow-md">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Pump Steamm</h1>
-          <ConnectButton />
+    <div
+      style={{
+        maxWidth: "1024px",
+        margin: "0 auto",
+        padding: "20px",
+        fontFamily: "sans-serif",
+      }}
+    >
+      <header
+        style={{
+          marginBottom: "30px",
+          borderBottom: "1px solid #eaeaea",
+          paddingBottom: "20px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <h1
+            style={{
+              fontSize: "28px",
+              fontWeight: "bold",
+              margin: 0,
+            }}
+          >
+            Pump Steamm
+          </h1>
+          <div>
+            <ConnectButton />
+          </div>
         </div>
       </header>
 
-      <main className="container mx-auto py-8 px-4">
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-bold mb-4">Bonding Curve Protocol</h2>
-        </div>
+      <main>
+        <div>
+          <div
+            style={{
+              textAlign: "center",
+              marginBottom: "40px",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "24px",
+                fontWeight: "bold",
+                marginBottom: "16px",
+              }}
+            >
+              Bonding Curve Protocol
+            </h2>
+            <p
+              style={{
+                fontSize: "16px",
+                maxWidth: "600px",
+                margin: "0 auto",
+                color: "#4b5563",
+              }}
+            >
+              Interact with bonding curves to buy and sell tokens on Sui. Create
+              new tokens and trade on the decentralized curve.
+            </p>
+          </div>
 
-        <BondingCurveInteraction />
+          <BondingCurveInteraction />
+        </div>
       </main>
-
-      <footer className="bg-gray-800 text-white p-4 mt-12">
-        <div className="container mx-auto text-center">
-          <p>Pump Steamm Protocol - Built on Sui</p>
-        </div>
-      </footer>
     </div>
   );
 };
