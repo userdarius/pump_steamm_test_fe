@@ -2,7 +2,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { createCoinBytecode } from "./coinGen";
 
-const BTOKEN_URI = "TODO";
+const TOKEN_URI = "TODO";
 const LP_TOKEN_URI = "TODO";
 
 export async function createBToken2(
@@ -14,16 +14,16 @@ export async function createBToken2(
   const moduleName = coinType.split("::")[1];
   const structType = coinType.split("::")[2];
 
-  const bModuleName = `b_${moduleName}`;
-  const bstructType = `B_${structType}`;
+  const bModuleName = `${moduleName}`;
+  const bstructType = `${structType}`;
 
-  const bTokenName = `bToken ${coinSymbol}`;
+  const bTokenName = `Token ${coinSymbol}`;
 
   // Construct LP token symbol
-  const bTokenSymbol = `b${coinSymbol}`;
+  const bTokenSymbol = `${coinSymbol}`;
 
   // LP token description
-  const lpDescription = "Steamm bToken";
+  const lpDescription = "Pump Steamm Token";
 
   const bytecode = await createCoinBytecode(
     bstructType,
@@ -31,7 +31,7 @@ export async function createBToken2(
     bTokenSymbol,
     bTokenName,
     lpDescription,
-    BTOKEN_URI,
+    TOKEN_URI,
   );
 
   // Step 1: Create the coin

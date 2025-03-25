@@ -24,13 +24,13 @@ export async function createCoinBytecode(
   symbol: string, // eg sSUI
   name: string, // eg Spring SUI
   description: string, // eg Spring SUI is a liquid staking protocol on Sui
-  img_url: string,
+  img_url: string
 ) {
   await initializeWasm();
 
   const bytecode = Buffer.from(
     "oRzrCwYAAAAKAQAMAgweAyonBFEIBVlMB6UBywEI8AJgBtADXQqtBAUMsgQoABABCwIGAhECEgITAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABDwUGAQACBwgJAQIDDAUBAQwDDQ0BAQwEDgoLAAUKAwQAAQQCBwQMAwICCAAHCAQAAQsCAQgAAQoCAQgFAQkAAQsBAQkAAQgABwkAAgoCCgIKAgsBAQgFBwgEAgsDAQkACwIBCQABBggEAQUBCwMBCAACCQAFDENvaW5NZXRhZGF0YQZPcHRpb24IVEVNUExBVEULVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0FW5ld191bnNhZmVfZnJvbV9ieXRlcwZvcHRpb24TcHVibGljX3NoYXJlX29iamVjdA9wdWJsaWNfdHJhbnNmZXIGc2VuZGVyBHNvbWUIdGVtcGxhdGUIdHJhbnNmZXIKdHhfY29udGV4dAN1cmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAQkKAgUEVE1QTAoCDg1UZW1wbGF0ZSBDb2luCgIaGVRlbXBsYXRlIENvaW4gRGVzY3JpcHRpb24KAiEgaHR0cHM6Ly9leGFtcGxlLmNvbS90ZW1wbGF0ZS5wbmcAAgEIAQAAAAACEgsABwAHAQcCBwMHBBEGOAAKATgBDAILAS4RBTgCCwI4AwIA=",
-    "base64",
+    "base64"
   );
 
   let updated = update_identifiers(bytecode, {
@@ -42,41 +42,41 @@ export async function createCoinBytecode(
     updated,
     bcs.string().serialize(symbol).toBytes(),
     bcs.string().serialize("TMPL").toBytes(),
-    "Vector(U8)", // type of the constant
+    "Vector(U8)" // type of the constant
   );
 
   updated = update_constants(
     updated,
     bcs.string().serialize(name).toBytes(), // new value
     bcs.string().serialize("Template Coin").toBytes(), // current value
-    "Vector(U8)", // type of the constant
+    "Vector(U8)" // type of the constant
   );
 
   updated = update_constants(
     updated,
     bcs.string().serialize(description).toBytes(), // new value
     bcs.string().serialize("Template Coin Description").toBytes(), // current value
-    "Vector(U8)", // type of the constant
+    "Vector(U8)" // type of the constant
   );
 
   updated = update_constants(
     updated,
     bcs.string().serialize(img_url).toBytes(), // new value
     bcs.string().serialize("https://example.com/template.png").toBytes(), // current value
-    "Vector(U8)", // type of the constant
+    "Vector(U8)" // type of the constant
   );
 
   return updated;
 }
 
 export function getTreasuryAndCoinMeta(
-  publishTxResponse: SuiTransactionBlockResponse,
+  publishTxResponse: SuiTransactionBlockResponse
 ): [string, string, string] {
   // Step 2: Get the treasury Cap id from the transaction
   const treasuryCapObjectChange: SuiObjectChange | undefined =
     publishTxResponse.objectChanges?.find(
       (change) =>
-        change.type === "created" && change.objectType.includes("TreasuryCap"),
+        change.type === "created" && change.objectType.includes("TreasuryCap")
     );
 
   if (!treasuryCapObjectChange) {
@@ -90,7 +90,7 @@ export function getTreasuryAndCoinMeta(
   const coinMetaObjectChange: SuiObjectChange | undefined =
     publishTxResponse.objectChanges?.find(
       (change) =>
-        change.type === "created" && change.objectType.includes("CoinMetadata"),
+        change.type === "created" && change.objectType.includes("CoinMetadata")
     );
 
   if (!coinMetaObjectChange) {
@@ -99,6 +99,53 @@ export function getTreasuryAndCoinMeta(
 
   if (coinMetaObjectChange.type !== "created") {
     throw new Error("CoinMetadata object change is not of type 'created'");
+  }
+
+  const coinMetadataId = coinMetaObjectChange.objectId;
+  const treasuryId = treasuryCapObjectChange.objectId;
+  const coinType = treasuryCapObjectChange.objectType
+    .split("<")[1]
+    .split(">")[0];
+
+  return [treasuryId, coinMetadataId, coinType];
+}
+
+// This function can handle different transaction result types
+export function extractTreasuryAndCoinMeta(
+  result: any
+): [string, string, string] {
+  // Try to find objectChanges in various possible structures
+  const objectChanges =
+    result.objectChanges ||
+    (result.effects && result.effects.objectChanges) ||
+    (typeof result.effects === "string"
+      ? JSON.parse(result.effects).objectChanges
+      : []);
+
+  if (!objectChanges || !Array.isArray(objectChanges)) {
+    throw new Error("Object changes not found in transaction result");
+  }
+
+  const treasuryCapObjectChange = objectChanges.find(
+    (change: any) =>
+      change.type === "created" &&
+      change.objectType &&
+      change.objectType.includes("TreasuryCap")
+  );
+
+  if (!treasuryCapObjectChange) {
+    throw new Error("TreasuryCap object change not found");
+  }
+
+  const coinMetaObjectChange = objectChanges.find(
+    (change: any) =>
+      change.type === "created" &&
+      change.objectType &&
+      change.objectType.includes("CoinMetadata")
+  );
+
+  if (!coinMetaObjectChange) {
+    throw new Error("CoinMetadata object change not found");
   }
 
   const coinMetadataId = coinMetaObjectChange.objectId;

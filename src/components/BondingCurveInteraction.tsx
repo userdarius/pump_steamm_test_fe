@@ -4,7 +4,10 @@ import {
   useSignAndExecuteTransaction,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
+import { SuiTransactionBlockResponse } from "@mysten/sui/client";
 import { getOwnedTokens } from "../utils/suiUtils";
+import { createBToken2 } from "../utils/createHelper";
+import { extractTreasuryAndCoinMeta } from "../utils/coinGen";
 
 // Define types for transaction results and events
 interface SuiEvent {
@@ -42,7 +45,9 @@ const BondingCurveInteraction: React.FC = () => {
   const [packageId, setPackageId] = useState(
     "0xdd718c698ebfb995e2ca740fd5c9ac625fe748b0a5e1e76db3ee629641688881"
   );
-  const [registryId, setRegistryId] = useState("");
+  const [registryId, setRegistryId] = useState(
+    "0x7cd97809c61e369a592901d0b1c34520342e55325742420beae271d031c193f6"
+  );
   const [bondingCurveId, setBondingCurveId] = useState("");
   const [coinTypeArg, setCoinTypeArg] = useState("");
 
@@ -54,6 +59,7 @@ const BondingCurveInteraction: React.FC = () => {
   const [tokenName, setTokenName] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("");
   const [tokenDescription, setTokenDescription] = useState("");
+  const [customCoinType, setCustomCoinType] = useState("");
 
   // State for token transactions
   const [buyAmount, setBuyAmount] = useState("");
@@ -100,9 +106,9 @@ const BondingCurveInteraction: React.FC = () => {
 
   // Function to create a new token with bonding curve
   const createTokenWithCurve = async () => {
-    if (!packageId || !registryId || !treasuryCapId || !metadataId) {
+    if (!packageId || !registryId || !tokenName || !tokenSymbol) {
       setTxResult(
-        "Please fill in all required fields: Package ID, Registry ID, Treasury Cap ID, and Metadata ID"
+        "Please fill in all required fields: Package ID, Registry ID, Token Name, and Token Symbol"
       );
       return;
     }
@@ -112,31 +118,108 @@ const BondingCurveInteraction: React.FC = () => {
       setTransactionStatus("loading");
       setTransactionDigest("");
       setTransactionError("");
-      setTxResult("Binding token to bonding curve...");
+      setTxResult("Creating token...");
 
-      const tx = new Transaction();
-      tx.setGasBudget(100000000);
+      // Step 1: Create the token
+      if (!currentAccount) {
+        throw new Error("No connected wallet");
+      }
 
-      tx.moveCall({
-        target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,
-        typeArguments: [
-          "0x41bd004e1e58d51c65e6e599e2127da2bb5e9f2fd6f94275d8448d832fcfbb2f::test_token::TEST_TOKEN",
-        ],
-        arguments: [
-          tx.object(registryId), // registry: &mut Registry
-          tx.object(treasuryCapId), // treasury_cap: TreasuryCap<T>
-          tx.object(metadataId), // metadata: CoinMetadata<T>
-        ],
-      });
+      // Generate module name (lowercase) and struct name (uppercase) from token symbol
+      // This is what we'll use for the token - address will be assigned on publish
+      const moduleNameForToken = tokenSymbol.toLowerCase().replace(/\s+/g, "_");
+      const structNameForToken = tokenSymbol.toUpperCase().replace(/\s+/g, "_");
 
+      // Create the basic identifier for the token - address will be assigned on chain
+      // For custom coin type, extract just the module and struct names
+      let moduleForCreation, structForCreation;
+
+      if (customCoinType) {
+        const parts = customCoinType.split("::");
+        if (parts.length === 3) {
+          // Ignore the address part (parts[0]) from custom coin type
+          moduleForCreation = parts[1];
+          structForCreation = parts[2];
+        } else {
+          // If format is not valid, use the default
+          moduleForCreation = moduleNameForToken;
+          structForCreation = structNameForToken;
+        }
+      } else {
+        moduleForCreation = moduleNameForToken;
+        structForCreation = structNameForToken;
+      }
+
+      const tokenIdentifier = `dummy::${moduleForCreation}::${structForCreation}`;
+      console.log("Creating token with identifier:", tokenIdentifier);
+
+      // Create the coin transaction - the actual address will be assigned on publish
+      const tokenTx = await createBToken2(
+        tokenIdentifier,
+        tokenSymbol,
+        currentAccount.address
+      );
+
+      // Execute token creation transaction
       signAndExecuteTransaction(
         {
-          transaction: tx.serialize(),
+          transaction: tokenTx.serialize(),
         },
         {
-          onSuccess: (result) => {
-            handleTransactionSuccess(result);
-            setLoading(false);
+          onSuccess: async (tokenResult) => {
+            setTxResult("Token created successfully! Now binding to curve...");
+            console.log("Token creation result:", tokenResult);
+
+            try {
+              // Get treasury cap and metadata IDs from transaction result using the more flexible function
+              const [treasuryId, metadataId, coinType] =
+                extractTreasuryAndCoinMeta(tokenResult);
+
+              console.log("Extracted token info:", {
+                treasuryId,
+                metadataId,
+                coinType,
+              });
+
+              // Update state with the new values
+              setTreasuryCapId(treasuryId);
+              setMetadataId(metadataId);
+              setCoinTypeArg(coinType);
+
+              // Step 2: Bind token to bonding curve
+              const bindTx = new Transaction();
+              bindTx.setGasBudget(100000000);
+
+              bindTx.moveCall({
+                target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,
+                typeArguments: [coinType],
+                arguments: [
+                  bindTx.object(registryId), // registry: &mut Registry
+                  bindTx.object(treasuryId), // treasury_cap: TreasuryCap<T>
+                  bindTx.object(metadataId), // metadata: CoinMetadata<T>
+                ],
+              });
+
+              // Execute binding transaction
+              signAndExecuteTransaction(
+                {
+                  transaction: bindTx.serialize(),
+                },
+                {
+                  onSuccess: (bindResult) => {
+                    handleTransactionSuccess(bindResult);
+                    setLoading(false);
+                  },
+                  onError: (error) => {
+                    handleTransactionError(error);
+                    setLoading(false);
+                  },
+                }
+              );
+            } catch (error) {
+              handleTransactionError(error);
+              setLoading(false);
+            }
           },
           onError: (error) => {
             handleTransactionError(error);
@@ -796,63 +879,6 @@ const BondingCurveInteraction: React.FC = () => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "15px",
-            }}
-          >
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "5px",
-                  fontSize: "14px",
-                  fontWeight: "500",
-                }}
-              >
-                Treasury Cap ID
-              </label>
-              <input
-                type="text"
-                value={treasuryCapId}
-                onChange={(e) => setTreasuryCapId(e.target.value)}
-                placeholder="Treasury Cap ID"
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                }}
-              />
-            </div>
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "5px",
-                  fontSize: "14px",
-                  fontWeight: "500",
-                }}
-              >
-                Metadata ID
-              </label>
-              <input
-                type="text"
-                value={metadataId}
-                onChange={(e) => setMetadataId(e.target.value)}
-                placeholder="Metadata ID"
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                }}
-              />
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
               gridTemplateColumns: "1fr 1fr 1fr",
               gap: "15px",
             }}
@@ -866,7 +892,7 @@ const BondingCurveInteraction: React.FC = () => {
                   fontWeight: "500",
                 }}
               >
-                Token Name (Display Only)
+                Token Name
               </label>
               <input
                 type="text"
@@ -890,7 +916,7 @@ const BondingCurveInteraction: React.FC = () => {
                   fontWeight: "500",
                 }}
               >
-                Token Symbol (Display Only)
+                Token Symbol
               </label>
               <input
                 type="text"
@@ -914,7 +940,7 @@ const BondingCurveInteraction: React.FC = () => {
                   fontWeight: "500",
                 }}
               >
-                Token Description (Display Only)
+                Token Description
               </label>
               <input
                 type="text"
@@ -931,11 +957,50 @@ const BondingCurveInteraction: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ textAlign: "center", fontSize: "14px", color: "#666" }}>
-            <p>
-              Note: Token name, symbol, and description are for display purposes
-              only. The actual values are already set in the metadata object.
-            </p>
+          <div>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "5px",
+                fontSize: "14px",
+                fontWeight: "500",
+              }}
+            >
+              Custom Module/Struct Names (Optional)
+            </label>
+            <input
+              type="text"
+              value={customCoinType}
+              onChange={(e) => setCustomCoinType(e.target.value)}
+              placeholder="0xANY::module_name::STRUCT_NAME"
+              style={{
+                width: "100%",
+                padding: "8px",
+                border: "1px solid #ddd",
+                borderRadius: "4px",
+              }}
+            />
+            <div style={{ marginTop: "5px", fontSize: "12px", color: "#666" }}>
+              <p>
+                Leave blank to automatically generate module and struct names
+                based on token symbol.
+              </p>
+              <p>
+                Format: <code>0xANY::module_name::STRUCT_NAME</code> (the
+                address part is ignored)
+              </p>
+              <p>
+                Example: <code>0x123::my_token::MY_TOKEN</code>
+              </p>
+              <p>
+                Note: The actual address will be assigned when the token is
+                published to the chain.
+              </p>
+              <p>
+                By convention, module name should be lowercase and struct name
+                uppercase.
+              </p>
+            </div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "center" }}>
@@ -951,7 +1016,7 @@ const BondingCurveInteraction: React.FC = () => {
                 cursor: loading ? "not-allowed" : "pointer",
               }}
             >
-              {loading ? "Creating..." : "Bind Token to Curve"}
+              {loading ? "Creating..." : "Create & Bind Token to Curve"}
             </button>
           </div>
         </div>
