@@ -40,7 +40,7 @@ const BondingCurveInteraction: React.FC = () => {
 
   // State for contract interaction
   const [packageId, setPackageId] = useState(
-    "0xfe67289f3d0176e30f2cde3de83b7e42aeccf2a18b79f1d36c3b41dd983fcf41"
+    "0xdd718c698ebfb995e2ca740fd5c9ac625fe748b0a5e1e76db3ee629641688881"
   );
   const [registryId, setRegistryId] = useState("");
   const [bondingCurveId, setBondingCurveId] = useState("");
@@ -110,9 +110,9 @@ const BondingCurveInteraction: React.FC = () => {
       tx.setGasBudget(100000000);
 
       tx.moveCall({
-        target: `${packageId}::bonding_curve::bind_token_to_curve`,
+        target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,
         typeArguments: [
-          "0x0db1ec658bf451e0c1cf4fb11714d00e7981db93dd0e5c055725f4f08b31b576::test_token::TEST_TOKEN",
+          "0x41bd004e1e58d51c65e6e599e2127da2bb5e9f2fd6f94275d8448d832fcfbb2f::test_token::TEST_TOKEN",
         ],
         arguments: [
           tx.object(registryId), // registry: &mut Registry
@@ -142,111 +142,161 @@ const BondingCurveInteraction: React.FC = () => {
     }
   };
 
-  // Function to buy tokens
-  const buyTokens = async () => {
-    if (!packageId || !bondingCurveId || !Number(buyAmount)) {
-      setTxResult("Please fill all fields for buying tokens");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setTxResult("Buying tokens...");
-
-      const tx = new Transaction();
-      // Convert to 9 decimals (consistent with the contract)
-      const amount = Math.floor(Number(buyAmount) * 1000000000);
-
-      // Create SUI coin for payment
-      const [coin] = tx.splitCoins(tx.gas, [amount]);
-
-      // Call the buy function
-      tx.moveCall({
-        target: `${packageId}::bonding_curve::buy`,
-        typeArguments: [coinTypeArg],
-        arguments: [tx.object(bondingCurveId), coin],
-      });
-
-      signAndExecuteTransaction(
-        {
-          transaction: tx.serialize(),
-        },
-        {
-          onSuccess: (result) => {
-            handleTransactionSuccess(result);
-            refreshTokens();
-            setLoading(false);
-          },
-          onError: (error) => {
-            handleTransactionError(error);
-            setLoading(false);
-          },
-        }
-      );
-    } catch (error) {
-      handleTransactionError(error);
-      setLoading(false);
-    }
-  };
-
   // Function to sell tokens
-  const sellTokens = async () => {
-    if (
-      !packageId ||
-      !bondingCurveId ||
-      !selectedToken ||
-      !Number(sellAmount)
-    ) {
-      setTxResult("Please fill all fields for selling tokens");
-      return;
-    }
+const sellTokens = async () => {
+  if (!packageId || !bondingCurveId || !selectedToken || !Number(sellAmount)) {
+    setTxResult("Please fill all fields for selling tokens");
+    return;
+  }
 
-    // Ensure the coinTypeArg is set before selling
-    if (!coinTypeArg) {
-      setTxResult("Coin type is not set. Please enter a valid coin type.");
-      return;
-    }
+  // Ensure the coinTypeArg is set before selling
+  if (!coinTypeArg) {
+    setTxResult("Coin type is not set. Please enter a valid coin type.");
+    return;
+  }
 
-    try {
-      setLoading(true);
-      setTxResult("Selling tokens...");
+  try {
+    setLoading(true);
+    setTxResult("Selling tokens...");
 
-      const tx = new Transaction();
-      // Convert to 9 decimals (consistent with the contract)
-      const amount = Math.floor(Number(sellAmount) * 1000000000);
+    // Fetch the latest bonding curve object before constructing the transaction
+    const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
 
-      // Split the selected token
-      const tokenObj = tx.object(selectedToken);
-      const [tokenToSell] = tx.splitCoins(tokenObj, [amount]);
+    const tx = new Transaction();
+    // Convert to 9 decimals (consistent with the contract)
+    const amount = Math.floor(Number(sellAmount) * 1000000000);
 
-      // Call the sell function
-      tx.moveCall({
-        target: `${packageId}::bonding_curve::sell`,
-        typeArguments: [coinTypeArg],
-        arguments: [tx.object(bondingCurveId), tokenToSell],
-      });
+    // Split the selected token
+    const tokenObj = tx.object(selectedToken);
+    const [tokenToSell] = tx.splitCoins(tokenObj, [amount]);
 
-      signAndExecuteTransaction(
-        {
-          transaction: tx.serialize(),
+    // Call the sell function with the latest bonding curve object
+    tx.moveCall({
+      target: `${packageId}::bonding_curve::sell`,
+      typeArguments: [coinTypeArg],
+      arguments: [tx.object(latestBondingCurveId), tokenToSell],
+    });
+
+    signAndExecuteTransaction(
+      {
+        transaction: tx.serialize(),
+      },
+      {
+        onSuccess: (result) => {
+          handleTransactionSuccess(result);
+          refreshTokens();
+          setLoading(false);
         },
-        {
-          onSuccess: (result) => {
-            handleTransactionSuccess(result);
-            refreshTokens();
-            setLoading(false);
+        onError: (error) => {
+          handleTransactionError(error);
+          setLoading(false);
+        },
+      }
+    );
+  } catch (error) {
+    handleTransactionError(error);
+    setLoading(false);
+  }
+};
+
+// Also add the same pattern to buyTokens for consistency
+const buyTokens = async () => {
+  if (!packageId || !bondingCurveId || !Number(buyAmount)) {
+    setTxResult("Please fill all fields for buying tokens");
+    return;
+  }
+
+  try {
+    setLoading(true);
+    setTxResult("Buying tokens...");
+
+    // Fetch the latest bonding curve object before constructing the transaction
+    const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
+
+    const tx = new Transaction();
+    // Convert to 9 decimals (consistent with the contract)
+    const amount = Math.floor(Number(buyAmount) * 1000000000);
+
+    // Create SUI coin for payment
+    const [coin] = tx.splitCoins(tx.gas, [amount]);
+
+    // Call the buy function with the latest bonding curve object
+    tx.moveCall({
+      target: `${packageId}::bonding_curve::buy`,
+      typeArguments: [coinTypeArg],
+      arguments: [tx.object(latestBondingCurveId), coin],
+    });
+
+    signAndExecuteTransaction(
+      {
+        transaction: tx.serialize(),
+      },
+      {
+        onSuccess: (result) => {
+          handleTransactionSuccess(result);
+          refreshTokens();
+          setLoading(false);
+        },
+        onError: (error) => {
+          handleTransactionError(error);
+          setLoading(false);
+        },
+      }
+    );
+  } catch (error) {
+    handleTransactionError(error);
+    setLoading(false);
+  }
+};
+
+// Add function to fetch the latest object ID
+const fetchLatestObjectId = async (objectId: string): Promise<string> => {
+  try {
+    // Use SUI RPC to get the latest object
+    const response = await fetch("https://fullnode.devnet.sui.io", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sui_getObject",
+        params: [
+          objectId,
+          {
+            showContent: true,
+            showOwner: true,
           },
-          onError: (error) => {
-            handleTransactionError(error);
-            setLoading(false);
-          },
-        }
+        ],
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.result && data.result.data) {
+      // If successful, return the same ID (it will use the latest version)
+      console.log("Fetched latest bonding curve object:", data.result.data);
+      return objectId;
+    } else {
+      console.warn(
+        "Could not fetch latest object, using current ID:",
+        objectId
       );
-    } catch (error) {
-      handleTransactionError(error);
-      setLoading(false);
+      return objectId;
     }
-  };
+  } catch (error) {
+    console.error("Error fetching latest object:", error);
+    // Return the original ID if there's an error
+    return objectId;
+  }
+};
+
+// Format token balance for display
+const formatBalance = (balance: bigint): string => {
+  return (Number(balance) / 1000000000).toFixed(9);
+};
+
 
   const handleTransactionSuccess = (result: any) => {
     setTxResult(JSON.stringify(result, null, 2));
@@ -400,11 +450,6 @@ const BondingCurveInteraction: React.FC = () => {
         currentAccount ? "Missing coin type" : "Missing account"
       );
     }
-  };
-
-  // Format token balance for display
-  const formatBalance = (balance: bigint): string => {
-    return (Number(balance) / 1000000000).toFixed(9);
   };
 
   return (
