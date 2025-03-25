@@ -65,6 +65,11 @@ const BondingCurveInteraction: React.FC = () => {
   const [txResult, setTxResult] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [transactionType, setTransactionType] = useState("create"); // create, buy, sell
+  const [transactionStatus, setTransactionStatus] = useState<
+    "idle" | "loading" | "confirmed" | "failed"
+  >("idle");
+  const [transactionDigest, setTransactionDigest] = useState<string>("");
+  const [transactionError, setTransactionError] = useState<string>("");
 
   // Stats for display
   const [virtualSuiReserves, setVirtualSuiReserves] = useState<string>("0");
@@ -104,6 +109,9 @@ const BondingCurveInteraction: React.FC = () => {
 
     try {
       setLoading(true);
+      setTransactionStatus("loading");
+      setTransactionDigest("");
+      setTransactionError("");
       setTxResult("Binding token to bonding curve...");
 
       const tx = new Transaction();
@@ -143,163 +151,174 @@ const BondingCurveInteraction: React.FC = () => {
   };
 
   // Function to sell tokens
-const sellTokens = async () => {
-  if (!packageId || !bondingCurveId || !selectedToken || !Number(sellAmount)) {
-    setTxResult("Please fill all fields for selling tokens");
-    return;
-  }
+  const sellTokens = async () => {
+    if (
+      !packageId ||
+      !bondingCurveId ||
+      !selectedToken ||
+      !Number(sellAmount)
+    ) {
+      setTxResult("Please fill all fields for selling tokens");
+      return;
+    }
 
-  // Ensure the coinTypeArg is set before selling
-  if (!coinTypeArg) {
-    setTxResult("Coin type is not set. Please enter a valid coin type.");
-    return;
-  }
+    // Ensure the coinTypeArg is set before selling
+    if (!coinTypeArg) {
+      setTxResult("Coin type is not set. Please enter a valid coin type.");
+      return;
+    }
 
-  try {
-    setLoading(true);
-    setTxResult("Selling tokens...");
+    try {
+      setLoading(true);
+      setTransactionStatus("loading");
+      setTransactionDigest("");
+      setTransactionError("");
+      setTxResult("Selling tokens...");
 
-    // Fetch the latest bonding curve object before constructing the transaction
-    const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
+      // Fetch the latest bonding curve object before constructing the transaction
+      const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
 
-    const tx = new Transaction();
-    // Convert to 9 decimals (consistent with the contract)
-    const amount = Math.floor(Number(sellAmount) * 1000000000);
+      const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the contract)
+      const amount = Math.floor(Number(sellAmount) * 1000000000);
 
-    // Split the selected token
-    const tokenObj = tx.object(selectedToken);
-    const [tokenToSell] = tx.splitCoins(tokenObj, [amount]);
+      // Split the selected token
+      const tokenObj = tx.object(selectedToken);
+      const [tokenToSell] = tx.splitCoins(tokenObj, [amount]);
 
-    // Call the sell function with the latest bonding curve object
-    tx.moveCall({
-      target: `${packageId}::bonding_curve::sell`,
-      typeArguments: [coinTypeArg],
-      arguments: [tx.object(latestBondingCurveId), tokenToSell],
-    });
+      // Call the sell function with the latest bonding curve object
+      tx.moveCall({
+        target: `${packageId}::bonding_curve::sell`,
+        typeArguments: [coinTypeArg],
+        arguments: [tx.object(latestBondingCurveId), tokenToSell],
+      });
 
-    signAndExecuteTransaction(
-      {
-        transaction: tx.serialize(),
-      },
-      {
-        onSuccess: (result) => {
-          handleTransactionSuccess(result);
-          refreshTokens();
-          setLoading(false);
+      signAndExecuteTransaction(
+        {
+          transaction: tx.serialize(),
         },
-        onError: (error) => {
-          handleTransactionError(error);
-          setLoading(false);
-        },
-      }
-    );
-  } catch (error) {
-    handleTransactionError(error);
-    setLoading(false);
-  }
-};
-
-// Also add the same pattern to buyTokens for consistency
-const buyTokens = async () => {
-  if (!packageId || !bondingCurveId || !Number(buyAmount)) {
-    setTxResult("Please fill all fields for buying tokens");
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setTxResult("Buying tokens...");
-
-    // Fetch the latest bonding curve object before constructing the transaction
-    const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
-
-    const tx = new Transaction();
-    // Convert to 9 decimals (consistent with the contract)
-    const amount = Math.floor(Number(buyAmount) * 1000000000);
-
-    // Create SUI coin for payment
-    const [coin] = tx.splitCoins(tx.gas, [amount]);
-
-    // Call the buy function with the latest bonding curve object
-    tx.moveCall({
-      target: `${packageId}::bonding_curve::buy`,
-      typeArguments: [coinTypeArg],
-      arguments: [tx.object(latestBondingCurveId), coin],
-    });
-
-    signAndExecuteTransaction(
-      {
-        transaction: tx.serialize(),
-      },
-      {
-        onSuccess: (result) => {
-          handleTransactionSuccess(result);
-          refreshTokens();
-          setLoading(false);
-        },
-        onError: (error) => {
-          handleTransactionError(error);
-          setLoading(false);
-        },
-      }
-    );
-  } catch (error) {
-    handleTransactionError(error);
-    setLoading(false);
-  }
-};
-
-// Add function to fetch the latest object ID
-const fetchLatestObjectId = async (objectId: string): Promise<string> => {
-  try {
-    // Use SUI RPC to get the latest object
-    const response = await fetch("https://fullnode.devnet.sui.io", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "sui_getObject",
-        params: [
-          objectId,
-          {
-            showContent: true,
-            showOwner: true,
+        {
+          onSuccess: (result) => {
+            handleTransactionSuccess(result);
+            refreshTokens();
+            setLoading(false);
           },
-        ],
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data.result && data.result.data) {
-      // If successful, return the same ID (it will use the latest version)
-      console.log("Fetched latest bonding curve object:", data.result.data);
-      return objectId;
-    } else {
-      console.warn(
-        "Could not fetch latest object, using current ID:",
-        objectId
+          onError: (error) => {
+            handleTransactionError(error);
+            setLoading(false);
+          },
+        }
       );
+    } catch (error) {
+      handleTransactionError(error);
+      setLoading(false);
+    }
+  };
+
+  // Also add the same pattern to buyTokens for consistency
+  const buyTokens = async () => {
+    if (!packageId || !bondingCurveId || !Number(buyAmount)) {
+      setTxResult("Please fill all fields for buying tokens");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setTransactionStatus("loading");
+      setTransactionDigest("");
+      setTransactionError("");
+      setTxResult("Buying tokens...");
+
+      // Fetch the latest bonding curve object before constructing the transaction
+      const latestBondingCurveId = await fetchLatestObjectId(bondingCurveId);
+
+      const tx = new Transaction();
+      // Convert to 9 decimals (consistent with the contract)
+      const amount = Math.floor(Number(buyAmount) * 1000000000);
+
+      // Create SUI coin for payment
+      const [coin] = tx.splitCoins(tx.gas, [amount]);
+
+      // Call the buy function with the latest bonding curve object
+      tx.moveCall({
+        target: `${packageId}::bonding_curve::buy`,
+        typeArguments: [coinTypeArg],
+        arguments: [tx.object(latestBondingCurveId), coin],
+      });
+
+      signAndExecuteTransaction(
+        {
+          transaction: tx.serialize(),
+        },
+        {
+          onSuccess: (result) => {
+            handleTransactionSuccess(result);
+            refreshTokens();
+            setLoading(false);
+          },
+          onError: (error) => {
+            handleTransactionError(error);
+            setLoading(false);
+          },
+        }
+      );
+    } catch (error) {
+      handleTransactionError(error);
+      setLoading(false);
+    }
+  };
+
+  // Add function to fetch the latest object ID
+  const fetchLatestObjectId = async (objectId: string): Promise<string> => {
+    try {
+      // Use SUI RPC to get the latest object
+      const response = await fetch("https://fullnode.devnet.sui.io", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "sui_getObject",
+          params: [
+            objectId,
+            {
+              showContent: true,
+              showOwner: true,
+            },
+          ],
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.result && data.result.data) {
+        // If successful, return the same ID (it will use the latest version)
+        console.log("Fetched latest bonding curve object:", data.result.data);
+        return objectId;
+      } else {
+        console.warn(
+          "Could not fetch latest object, using current ID:",
+          objectId
+        );
+        return objectId;
+      }
+    } catch (error) {
+      console.error("Error fetching latest object:", error);
+      // Return the original ID if there's an error
       return objectId;
     }
-  } catch (error) {
-    console.error("Error fetching latest object:", error);
-    // Return the original ID if there's an error
-    return objectId;
-  }
-};
+  };
 
-// Format token balance for display
-const formatBalance = (balance: bigint): string => {
-  return (Number(balance) / 1000000000).toFixed(9);
-};
-
+  // Format token balance for display
+  const formatBalance = (balance: bigint): string => {
+    return (Number(balance) / 1000000000).toFixed(9);
+  };
 
   const handleTransactionSuccess = (result: any) => {
-    setTxResult(JSON.stringify(result, null, 2));
+    setTransactionStatus("confirmed");
+    setTransactionDigest(result.digest || "");
 
     // Process transaction events to extract information
     try {
@@ -407,6 +426,7 @@ const formatBalance = (balance: bigint): string => {
 
   const handleTransactionError = (error: any) => {
     console.error("Transaction error:", error);
+    setTransactionStatus("failed");
 
     let errorMessage = "Transaction failed";
 
@@ -418,6 +438,7 @@ const formatBalance = (balance: bigint): string => {
       errorMessage = String(error);
     }
 
+    setTransactionError(errorMessage);
     setTxResult(`Error: ${errorMessage}`);
   };
 
@@ -474,8 +495,133 @@ const formatBalance = (balance: bigint): string => {
         Bonding Curve Interaction
       </h2>
 
-      {/* Transaction result display */}
-      {txResult && (
+      {/* Transaction Status Display */}
+      <div
+        style={{
+          marginBottom: "20px",
+          padding: "15px",
+          backgroundColor:
+            transactionStatus === "loading"
+              ? "#f9fafb"
+              : transactionStatus === "confirmed"
+              ? "#dcfce7"
+              : transactionStatus === "failed"
+              ? "#fee2e2"
+              : "#f7f7f7",
+          borderRadius: "6px",
+          textAlign: "center",
+          display: transactionStatus !== "idle" ? "block" : "none",
+        }}
+      >
+        {transactionStatus === "loading" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+            }}
+          >
+            <div
+              style={{
+                width: "30px",
+                height: "30px",
+                border: "3px solid #e5e7eb",
+                borderTopColor: "#3b82f6",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }}
+            />
+            <style>
+              {`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}
+            </style>
+            <p style={{ fontWeight: "medium" }}>Transaction in progress...</p>
+          </div>
+        )}
+
+        {transactionStatus === "confirmed" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+            }}
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 20 20"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              style={{ color: "#22c55e" }}
+            >
+              <path
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                fill="currentColor"
+              />
+            </svg>
+            <div>
+              <p style={{ fontWeight: "medium", marginBottom: "5px" }}>
+                Transaction Confirmed
+              </p>
+              {transactionDigest && (
+                <p
+                  style={{
+                    fontSize: "14px",
+                    color: "#6b7280",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  Digest: {transactionDigest}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {transactionStatus === "failed" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+            }}
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 20 20"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              style={{ color: "#ef4444" }}
+            >
+              <path
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                fill="currentColor"
+              />
+            </svg>
+            <div>
+              <p style={{ fontWeight: "medium", marginBottom: "5px" }}>
+                Transaction Failed
+              </p>
+              {transactionError && (
+                <p style={{ fontSize: "14px", color: "#6b7280" }}>
+                  Error: {transactionError}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Transaction result display (keep for backward compatibility) */}
+      {txResult && transactionStatus === "idle" && (
         <div
           style={{
             marginBottom: "20px",
