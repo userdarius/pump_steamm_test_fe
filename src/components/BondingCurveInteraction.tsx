@@ -4,10 +4,17 @@ import {
   useSignAndExecuteTransaction,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
-import { SuiTransactionBlockResponse } from "@mysten/sui/client";
 import { getOwnedTokens } from "../utils/suiUtils";
-import { createBToken2 } from "../utils/createHelper";
-import { extractTreasuryAndCoinMeta } from "../utils/coinGen";
+import { normalizeSuiAddress } from "@mysten/sui/utils";
+import {
+  SuiObjectChange,
+  SuiTransactionBlockResponse,
+} from "@mysten/sui/client";
+import init, {
+  update_constants,
+  update_identifiers,
+} from "@mysten/move-bytecode-template";
+import { bcs } from "@mysten/sui/bcs";
 
 // Define types for transaction results and events
 interface SuiEvent {
@@ -82,6 +89,24 @@ const BondingCurveInteraction: React.FC = () => {
   const [virtualTokenReserves, setVirtualTokenReserves] = useState<string>("0");
   const [hasTransitioned, setHasTransitioned] = useState(false);
 
+  // WASM initialization state
+  const [wasmInitialized, setWasmInitialized] = useState(false);
+
+  // Initialize WASM module when component mounts
+  useEffect(() => {
+    const initWasm = async () => {
+      try {
+        await init();
+        setWasmInitialized(true);
+        console.log("WASM module initialized successfully");
+      } catch (error) {
+        console.error("Failed to initialize WASM module:", error);
+      }
+    };
+
+    initWasm();
+  }, []);
+
   // Fetch user's tokens when address or coin type changes
   useEffect(() => {
     const fetchTokens = async () => {
@@ -104,11 +129,190 @@ const BondingCurveInteraction: React.FC = () => {
     fetchTokens();
   }, [currentAccount, coinTypeArg]);
 
+  // Helper function to sign and execute a transaction
+  const signExecuteAndWaitForTransaction = async (
+    transaction: Transaction,
+    options?: { auction?: boolean }
+  ): Promise<SuiTransactionBlockResponse> => {
+    return new Promise((resolve, reject) => {
+      signAndExecuteTransaction(
+        {
+          transaction: transaction.serialize(),
+        },
+        {
+          onSuccess: (result) =>
+            resolve(result as unknown as SuiTransactionBlockResponse),
+          onError: (error) => reject(error),
+        }
+      );
+    });
+  };
+
+  // Helper function to extract treasury cap and metadata info from transaction result
+  const extractTreasuryAndCoinMeta = (
+    result: SuiTransactionBlockResponse
+  ): [string, string, string] => {
+    // Get TreasuryCap id from transaction
+    const treasuryCapObjectChange: SuiObjectChange | undefined =
+      result.objectChanges?.find(
+        (change: SuiObjectChange) =>
+          change.type === "created" && change.objectType.includes("TreasuryCap")
+      );
+    if (!treasuryCapObjectChange)
+      throw new Error("TreasuryCap object change not found");
+    if (treasuryCapObjectChange.type !== "created")
+      throw new Error("TreasuryCap object change is not of type 'created'");
+
+    // Get CoinMetadata id from transaction
+    const coinMetaObjectChange: SuiObjectChange | undefined =
+      result.objectChanges?.find(
+        (change: SuiObjectChange) =>
+          change.type === "created" &&
+          change.objectType.includes("CoinMetadata")
+      );
+    if (!coinMetaObjectChange)
+      throw new Error("CoinMetadata object change not found");
+    if (coinMetaObjectChange.type !== "created")
+      throw new Error("CoinMetadata object change is not of type 'created'");
+
+    const treasuryCapId = treasuryCapObjectChange.objectId;
+    const coinType = treasuryCapObjectChange.objectType
+      .split("<")[1]
+      .split(">")[0];
+    const coinMetadataId = coinMetaObjectChange.objectId;
+
+    return [treasuryCapId, coinMetadataId, coinType];
+  };
+
+  const createCoin = async (bytecode: Uint8Array<ArrayBufferLike>) => {
+    const transaction = new Transaction();
+
+    const [upgradeCap] = transaction.publish({
+      modules: [[...bytecode]],
+      dependencies: [normalizeSuiAddress("0x1"), normalizeSuiAddress("0x2")],
+    });
+    transaction.transferObjects(
+      [upgradeCap],
+      transaction.pure.address(currentAccount?.address!)
+    );
+
+    const res = await signExecuteAndWaitForTransaction(transaction);
+
+    // Get TreasuryCap id from transaction
+    const treasuryCapObjectChange: SuiObjectChange | undefined =
+      res.objectChanges?.find(
+        (change: SuiObjectChange) =>
+          change.type === "created" && change.objectType.includes("TreasuryCap")
+      );
+    if (!treasuryCapObjectChange)
+      throw new Error("TreasuryCap object change not found");
+    if (treasuryCapObjectChange.type !== "created")
+      throw new Error("TreasuryCap object change is not of type 'created'");
+
+    // Get CoinMetadata id from transaction
+    const coinMetaObjectChange: SuiObjectChange | undefined =
+      res.objectChanges?.find(
+        (change: SuiObjectChange) =>
+          change.type === "created" &&
+          change.objectType.includes("CoinMetadata")
+      );
+    if (!coinMetaObjectChange)
+      throw new Error("CoinMetadata object change not found");
+    if (coinMetaObjectChange.type !== "created")
+      throw new Error("CoinMetadata object change is not of type 'created'");
+
+    const treasuryCapId = treasuryCapObjectChange.objectId;
+    const coinType = treasuryCapObjectChange.objectType
+      .split("<")[1]
+      .split(">")[0];
+    const coinMetadataId = coinMetaObjectChange.objectId;
+
+    console.log(
+      "coinType:",
+      coinType,
+      "treasuryCapId:",
+      treasuryCapId,
+      "coinMetadataId:",
+      coinMetadataId
+    );
+
+    return { treasuryCapId, coinType, coinMetadataId };
+  };
+  type CreateCoinReturnType = Awaited<ReturnType<typeof createCoin>>;
+
+  // Helper function to create token bytecode
+  const createTokenBytecode = async (
+    tokenName: string,
+    tokenSymbol: string,
+    tokenDescription: string,
+    moduleNameForToken: string,
+    structNameForToken: string
+  ): Promise<Uint8Array> => {
+    if (!wasmInitialized) {
+      throw new Error(
+        "WASM module is not initialized yet. Please try again later."
+      );
+    }
+
+    const bytecode = Buffer.from(
+      "oRzrCwYAAAAKAQAMAgweAyonBFEIBVlMB6UBywEI8AJgBtADXQqtBAUMsgQoABABCwIGAhECEgITAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABDwUGAQACBwgJAQIDDAUBAQwDDQ0BAQwEDgoLAAUKAwQAAQQCBwQMAwICCAAHCAQAAQsCAQgAAQoCAQgFAQkAAQsBAQkAAQgABwkAAgoCCgIKAgsBAQgFBwgEAgsDAQkACwIBCQABBggEAQUBCwMBCAACCQAFDENvaW5NZXRhZGF0YQZPcHRpb24IVEVNUExBVEULVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0FW5ld191bnNhZmVfZnJvbV9ieXRlcwZvcHRpb24TcHVibGljX3NoYXJlX29iamVjdA9wdWJsaWNfdHJhbnNmZXIGc2VuZGVyBHNvbWUIdGVtcGxhdGUIdHJhbnNmZXIKdHhfY29udGV4dAN1cmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAQkKAgUEVE1QTAoCDg1UZW1wbGF0ZSBDb2luCgIaGVRlbXBsYXRlIENvaW4gRGVzY3JpcHRpb24KAiEgaHR0cHM6Ly9leGFtcGxlLmNvbS90ZW1wbGF0ZS5wbmcAAgEIAQAAAAACEgsABwAHAQcCBwMHBBEGOAAKATgBDAILAS4RBTgCCwI4AwIA",
+      "base64"
+    );
+
+    // Replace the module and struct names in the bytecode
+    let updated = update_identifiers(bytecode, {
+      TEMPLATE: structNameForToken,
+      template: moduleNameForToken,
+    });
+
+    // Replace the token symbol
+    updated = update_constants(
+      updated,
+      bcs.string().serialize(tokenSymbol).toBytes(),
+      bcs.string().serialize("TMPL").toBytes(),
+      "Vector(U8)" // type of the constant
+    );
+
+    // Replace the token name
+    updated = update_constants(
+      updated,
+      bcs.string().serialize(tokenName).toBytes(), // new value
+      bcs.string().serialize("Template Coin").toBytes(), // current value
+      "Vector(U8)" // type of the constant
+    );
+
+    // Replace the token description
+    updated = update_constants(
+      updated,
+      bcs.string().serialize(tokenDescription).toBytes(), // new value
+      bcs.string().serialize("Template Coin Description").toBytes(), // current value
+      "Vector(U8)" // type of the constant
+    );
+
+    // Replace the token icon URL with a default one
+    const iconUrl = "https://example.com/token-icon.png";
+    updated = update_constants(
+      updated,
+      bcs.string().serialize(iconUrl).toBytes(), // new value
+      bcs.string().serialize("https://example.com/template.png").toBytes(), // current value
+      "Vector(U8)" // type of the constant
+    );
+
+    return updated;
+  };
+
   // Function to create a new token with bonding curve
   const createTokenWithCurve = async () => {
     if (!packageId || !registryId || !tokenName || !tokenSymbol) {
       setTxResult(
         "Please fill in all required fields: Package ID, Registry ID, Token Name, and Token Symbol"
+      );
+      return;
+    }
+
+    if (!wasmInitialized) {
+      setTxResult(
+        "WebAssembly module is still initializing. Please try again in a moment."
       );
       return;
     }
@@ -153,80 +357,66 @@ const BondingCurveInteraction: React.FC = () => {
       const tokenIdentifier = `dummy::${moduleForCreation}::${structForCreation}`;
       console.log("Creating token with identifier:", tokenIdentifier);
 
-      // Create the coin transaction - the actual address will be assigned on publish
-      const tokenTx = await createBToken2(
-        tokenIdentifier,
+      // Generate token bytecode
+      const bytecode = await createTokenBytecode(
+        tokenName,
         tokenSymbol,
-        currentAccount.address
+        tokenDescription || `${tokenName} Token`,
+        moduleForCreation,
+        structForCreation
       );
 
-      // Execute token creation transaction
-      signAndExecuteTransaction(
-        {
-          transaction: tokenTx.serialize(),
-        },
-        {
-          onSuccess: async (tokenResult) => {
-            setTxResult("Token created successfully! Now binding to curve...");
-            console.log("Token creation result:", tokenResult);
+      // Create the coin using our createCoin helper
+      try {
+        const { treasuryCapId, coinType, coinMetadataId } = await createCoin(
+          bytecode
+        );
 
-            try {
-              // Get treasury cap and metadata IDs from transaction result using the more flexible function
-              const [treasuryId, metadataId, coinType] =
-                extractTreasuryAndCoinMeta(tokenResult);
+        console.log("Token created successfully:", {
+          treasuryCapId,
+          coinType,
+          coinMetadataId,
+        });
 
-              console.log("Extracted token info:", {
-                treasuryId,
-                metadataId,
-                coinType,
-              });
+        setTxResult("Token created successfully! Now binding to curve...");
+        setTreasuryCapId(treasuryCapId);
+        setMetadataId(coinMetadataId);
+        setCoinTypeArg(coinType);
 
-              // Update state with the new values
-              setTreasuryCapId(treasuryId);
-              setMetadataId(metadataId);
-              setCoinTypeArg(coinType);
+        // Step 2: Bind token to bonding curve
+        const bindTx = new Transaction();
+        bindTx.setGasBudget(100000000);
 
-              // Step 2: Bind token to bonding curve
-              const bindTx = new Transaction();
-              bindTx.setGasBudget(100000000);
+        bindTx.moveCall({
+          target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,
+          typeArguments: [coinType],
+          arguments: [
+            bindTx.object(registryId), // registry: &mut Registry
+            bindTx.object(treasuryCapId), // treasury_cap: TreasuryCap<T>
+            bindTx.object(coinMetadataId), // metadata: CoinMetadata<T>
+          ],
+        });
 
-              bindTx.moveCall({
-                target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,
-                typeArguments: [coinType],
-                arguments: [
-                  bindTx.object(registryId), // registry: &mut Registry
-                  bindTx.object(treasuryId), // treasury_cap: TreasuryCap<T>
-                  bindTx.object(metadataId), // metadata: CoinMetadata<T>
-                ],
-              });
-
-              // Execute binding transaction
-              signAndExecuteTransaction(
-                {
-                  transaction: bindTx.serialize(),
-                },
-                {
-                  onSuccess: (bindResult) => {
-                    handleTransactionSuccess(bindResult);
-                    setLoading(false);
-                  },
-                  onError: (error) => {
-                    handleTransactionError(error);
-                    setLoading(false);
-                  },
-                }
-              );
-            } catch (error) {
+        // Execute binding transaction
+        signAndExecuteTransaction(
+          {
+            transaction: bindTx.serialize(),
+          },
+          {
+            onSuccess: (bindResult) => {
+              handleTransactionSuccess(bindResult);
+              setLoading(false);
+            },
+            onError: (error) => {
               handleTransactionError(error);
               setLoading(false);
-            }
-          },
-          onError: (error) => {
-            handleTransactionError(error);
-            setLoading(false);
-          },
-        }
-      );
+            },
+          }
+        );
+      } catch (error) {
+        handleTransactionError(error);
+        setLoading(false);
+      }
     } catch (error) {
       handleTransactionError(error);
       setLoading(false);
