@@ -96,11 +96,39 @@ const BondingCurveInteraction: React.FC = () => {
   useEffect(() => {
     const initWasm = async () => {
       try {
-        await init();
-        setWasmInitialized(true);
-        console.log("WASM module initialized successfully");
-      } catch (error) {
+        console.log("Starting WASM module initialization...");
+
+        // Use a try-catch to specifically catch and log WebAssembly-related errors
+        try {
+          await init();
+          console.log("WASM module initialized successfully");
+          setWasmInitialized(true);
+        } catch (wasmError: any) {
+          console.error("WebAssembly initialization error:", wasmError);
+
+          // Try with a manual fallback approach if needed
+          if (wasmError.message && wasmError.message.includes("MIME type")) {
+            console.warn(
+              "MIME type issue detected, attempting manual fallback..."
+            );
+            setTxResult(
+              "WebAssembly module had MIME type issues. Contact the developer to fix the server configuration."
+            );
+          } else {
+            setTxResult(
+              `WebAssembly initialization failed: ${
+                wasmError.message || "Unknown error"
+              }`
+            );
+          }
+        }
+      } catch (error: any) {
         console.error("Failed to initialize WASM module:", error);
+        setTxResult(
+          `Failed to initialize WebAssembly module: ${
+            error.message || "Unknown error"
+          }. Please refresh the page and try again.`
+        );
       }
     };
 
@@ -250,55 +278,81 @@ const BondingCurveInteraction: React.FC = () => {
   ): Promise<Uint8Array> => {
     if (!wasmInitialized) {
       throw new Error(
-        "WASM module is not initialized yet. Please try again later."
+        "WASM module is not initialized yet. Please check the console for errors and try refreshing the page."
       );
     }
 
-    const bytecode = Buffer.from(
-      "oRzrCwYAAAAKAQAMAgweAyonBFEIBVlMB6UBywEI8AJgBtADXQqtBAUMsgQoABABCwIGAhECEgITAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABDwUGAQACBwgJAQIDDAUBAQwDDQ0BAQwEDgoLAAUKAwQAAQQCBwQMAwICCAAHCAQAAQsCAQgAAQoCAQgFAQkAAQsBAQkAAQgABwkAAgoCCgIKAgsBAQgFBwgEAgsDAQkACwIBCQABBggEAQUBCwMBCAACCQAFDENvaW5NZXRhZGF0YQZPcHRpb24IVEVNUExBVEULVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0FW5ld191bnNhZmVfZnJvbV9ieXRlcwZvcHRpb24TcHVibGljX3NoYXJlX29iamVjdA9wdWJsaWNfdHJhbnNmZXIGc2VuZGVyBHNvbWUIdGVtcGxhdGUIdHJhbnNmZXIKdHhfY29udGV4dAN1cmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAQkKAgUEVE1QTAoCDg1UZW1wbGF0ZSBDb2luCgIaGVRlbXBsYXRlIENvaW4gRGVzY3JpcHRpb24KAiEgaHR0cHM6Ly9leGFtcGxlLmNvbS90ZW1wbGF0ZS5wbmcAAgEIAQAAAAACEgsABwAHAQcCBwMHBBEGOAAKATgBDAILAS4RBTgCCwI4AwIA",
-      "base64"
-    );
-
-    // Replace the module and struct names in the bytecode
-    let updated = update_identifiers(bytecode, {
-      TEMPLATE: structNameForToken,
-      template: moduleNameForToken,
+    // For debugging
+    console.log("Creating bytecode with parameters:", {
+      tokenName,
+      tokenSymbol,
+      tokenDescription,
+      moduleNameForToken,
+      structNameForToken,
     });
 
-    // Replace the token symbol
-    updated = update_constants(
-      updated,
-      bcs.string().serialize(tokenSymbol).toBytes(),
-      bcs.string().serialize("TMPL").toBytes(),
-      "Vector(U8)" // type of the constant
-    );
+    try {
+      const bytecode = Buffer.from(
+        "oRzrCwYAAAAKAQAMAgweAyonBFEIBVlMB6UBywEI8AJgBtADXQqtBAUMsgQoABABCwIGAhECEgITAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABDwUGAQACBwgJAQIDDAUBAQwDDQ0BAQwEDgoLAAUKAwQAAQQCBwQMAwICCAAHCAQAAQsCAQgAAQoCAQgFAQkAAQsBAQkAAQgABwkAAgoCCgIKAgsBAQgFBwgEAgsDAQkACwIBCQABBggEAQUBCwMBCAACCQAFDENvaW5NZXRhZGF0YQZPcHRpb24IVEVNUExBVEULVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0FW5ld191bnNhZmVfZnJvbV9ieXRlcwZvcHRpb24TcHVibGljX3NoYXJlX29iamVjdA9wdWJsaWNfdHJhbnNmZXIGc2VuZGVyBHNvbWUIdGVtcGxhdGUIdHJhbnNmZXIKdHhfY29udGV4dAN1cmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAQkKAgUEVE1QTAoCDg1UZW1wbGF0ZSBDb2luCgIaGVRlbXBsYXRlIENvaW4gRGVzY3JpcHRpb24KAiEgaHR0cHM6Ly9leGFtcGxlLmNvbS90ZW1wbGF0ZS5wbmcAAgEIAQAAAAACEgsABwAHAQcCBwMHBBEGOAAKATgBDAILAS4RBTgCCwI4AwIA",
+        "base64"
+      );
 
-    // Replace the token name
-    updated = update_constants(
-      updated,
-      bcs.string().serialize(tokenName).toBytes(), // new value
-      bcs.string().serialize("Template Coin").toBytes(), // current value
-      "Vector(U8)" // type of the constant
-    );
+      console.log(
+        "Bytecode loaded from Base64 string, proceeding with updates..."
+      );
 
-    // Replace the token description
-    updated = update_constants(
-      updated,
-      bcs.string().serialize(tokenDescription).toBytes(), // new value
-      bcs.string().serialize("Template Coin Description").toBytes(), // current value
-      "Vector(U8)" // type of the constant
-    );
+      // Replace the module and struct names in the bytecode
+      let updated = update_identifiers(bytecode, {
+        TEMPLATE: structNameForToken,
+        template: moduleNameForToken,
+      });
+      console.log("update_identifiers completed successfully");
 
-    // Replace the token icon URL with a default one
-    const iconUrl = "https://example.com/token-icon.png";
-    updated = update_constants(
-      updated,
-      bcs.string().serialize(iconUrl).toBytes(), // new value
-      bcs.string().serialize("https://example.com/template.png").toBytes(), // current value
-      "Vector(U8)" // type of the constant
-    );
+      // Replace the token symbol
+      updated = update_constants(
+        updated,
+        bcs.string().serialize(tokenSymbol).toBytes(),
+        bcs.string().serialize("TMPL").toBytes(),
+        "Vector(U8)" // type of the constant
+      );
+      console.log("update_constants for symbol completed successfully");
 
-    return updated;
+      // Replace the token name
+      updated = update_constants(
+        updated,
+        bcs.string().serialize(tokenName).toBytes(), // new value
+        bcs.string().serialize("Template Coin").toBytes(), // current value
+        "Vector(U8)" // type of the constant
+      );
+      console.log("update_constants for name completed successfully");
+
+      // Replace the token description
+      updated = update_constants(
+        updated,
+        bcs.string().serialize(tokenDescription).toBytes(), // new value
+        bcs.string().serialize("Template Coin Description").toBytes(), // current value
+        "Vector(U8)" // type of the constant
+      );
+      console.log("update_constants for description completed successfully");
+
+      // Replace the token icon URL with a default one
+      const iconUrl = "https://example.com/token-icon.png";
+      updated = update_constants(
+        updated,
+        bcs.string().serialize(iconUrl).toBytes(), // new value
+        bcs.string().serialize("https://example.com/template.png").toBytes(), // current value
+        "Vector(U8)" // type of the constant
+      );
+      console.log("update_constants for icon completed successfully");
+
+      console.log("Bytecode generation completed successfully");
+      return updated;
+    } catch (error: any) {
+      console.error("Error in createTokenBytecode:", error);
+      throw new Error(
+        `Failed to create token bytecode: ${error.message || "Unknown error"}`
+      );
+    }
   };
 
   // Function to create a new token with bonding curve
