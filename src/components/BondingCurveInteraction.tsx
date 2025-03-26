@@ -15,7 +15,7 @@ import init, {
   update_identifiers,
 } from "@mysten/move-bytecode-template";
 import { bcs } from "@mysten/sui/bcs";
-
+import { SuiClient } from "@mysten/sui/client";
 // Define types for transaction results and events
 interface SuiEvent {
   type: string;
@@ -158,7 +158,7 @@ const BondingCurveInteraction: React.FC = () => {
   }, [currentAccount, coinTypeArg]);
 
   // Helper function to sign and execute a transaction
-  const signExecuteAndWaitForTransaction = async (
+  const signAndExecute = async (
     transaction: Transaction,
     options?: { auction?: boolean }
   ): Promise<SuiTransactionBlockResponse> => {
@@ -176,43 +176,10 @@ const BondingCurveInteraction: React.FC = () => {
     });
   };
 
-  // Helper function to extract treasury cap and metadata info from transaction result
-  const extractTreasuryAndCoinMeta = (
-    result: SuiTransactionBlockResponse
-  ): [string, string, string] => {
-    // Get TreasuryCap id from transaction
-    const treasuryCapObjectChange: SuiObjectChange | undefined =
-      result.objectChanges?.find(
-        (change: SuiObjectChange) =>
-          change.type === "created" && change.objectType.includes("TreasuryCap")
-      );
-    if (!treasuryCapObjectChange)
-      throw new Error("TreasuryCap object change not found");
-    if (treasuryCapObjectChange.type !== "created")
-      throw new Error("TreasuryCap object change is not of type 'created'");
-
-    // Get CoinMetadata id from transaction
-    const coinMetaObjectChange: SuiObjectChange | undefined =
-      result.objectChanges?.find(
-        (change: SuiObjectChange) =>
-          change.type === "created" &&
-          change.objectType.includes("CoinMetadata")
-      );
-    if (!coinMetaObjectChange)
-      throw new Error("CoinMetadata object change not found");
-    if (coinMetaObjectChange.type !== "created")
-      throw new Error("CoinMetadata object change is not of type 'created'");
-
-    const treasuryCapId = treasuryCapObjectChange.objectId;
-    const coinType = treasuryCapObjectChange.objectType
-      .split("<")[1]
-      .split(">")[0];
-    const coinMetadataId = coinMetaObjectChange.objectId;
-
-    return [treasuryCapId, coinMetadataId, coinType];
-  };
-
   const createCoin = async (bytecode: Uint8Array<ArrayBufferLike>) => {
+    const client = new SuiClient({
+      url: "https://fullnode.testnet.sui.io:443",
+    });
     const transaction = new Transaction();
 
     const [upgradeCap] = transaction.publish({
@@ -224,12 +191,27 @@ const BondingCurveInteraction: React.FC = () => {
       transaction.pure.address(currentAccount?.address!)
     );
 
-    const res = await signExecuteAndWaitForTransaction(transaction);
+    const res = await signAndExecute(transaction);
+
+    const res2 = await client.waitForTransaction({
+      digest: res.digest,
+      options: {
+        showBalanceChanges: true,
+        showEffects: true,
+        showEvents: true,
+        showObjectChanges: true,
+      },
+    });
+
+    // Debug: Log transaction result details
+    console.log("Transaction successful! Digest:", res2.digest);
+    console.log("Transaction effects:", res2.effects);
+    console.log("Transaction object changes:", res2.objectChanges);
 
     // Get TreasuryCap id from transaction
     const treasuryCapObjectChange: SuiObjectChange | undefined =
-      res.objectChanges?.find(
-        (change: SuiObjectChange) =>
+      res2.objectChanges?.find(
+        (change) =>
           change.type === "created" && change.objectType.includes("TreasuryCap")
       );
     if (!treasuryCapObjectChange)
@@ -239,8 +221,8 @@ const BondingCurveInteraction: React.FC = () => {
 
     // Get CoinMetadata id from transaction
     const coinMetaObjectChange: SuiObjectChange | undefined =
-      res.objectChanges?.find(
-        (change: SuiObjectChange) =>
+      res2.objectChanges?.find(
+        (change) =>
           change.type === "created" &&
           change.objectType.includes("CoinMetadata")
       );
@@ -266,7 +248,6 @@ const BondingCurveInteraction: React.FC = () => {
 
     return { treasuryCapId, coinType, coinMetadataId };
   };
-  type CreateCoinReturnType = Awaited<ReturnType<typeof createCoin>>;
 
   // Helper function to create token bytecode
   const createTokenBytecode = async (
@@ -292,8 +273,9 @@ const BondingCurveInteraction: React.FC = () => {
     });
 
     try {
+      // Use bytecode from TEST_TOKEN which properly transfers metadata to sender
       const bytecode = Buffer.from(
-        "oRzrCwYAAAAKAQAMAgweAyonBFEIBVlMB6UBywEI8AJgBtADXQqtBAUMsgQoABABCwIGAhECEgITAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABDwUGAQACBwgJAQIDDAUBAQwDDQ0BAQwEDgoLAAUKAwQAAQQCBwQMAwICCAAHCAQAAQsCAQgAAQoCAQgFAQkAAQsBAQkAAQgABwkAAgoCCgIKAgsBAQgFBwgEAgsDAQkACwIBCQABBggEAQUBCwMBCAACCQAFDENvaW5NZXRhZGF0YQZPcHRpb24IVEVNUExBVEULVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0FW5ld191bnNhZmVfZnJvbV9ieXRlcwZvcHRpb24TcHVibGljX3NoYXJlX29iamVjdA9wdWJsaWNfdHJhbnNmZXIGc2VuZGVyBHNvbWUIdGVtcGxhdGUIdHJhbnNmZXIKdHhfY29udGV4dAN1cmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAQkKAgUEVE1QTAoCDg1UZW1wbGF0ZSBDb2luCgIaGVRlbXBsYXRlIENvaW4gRGVzY3JpcHRpb24KAiEgaHR0cHM6Ly9leGFtcGxlLmNvbS90ZW1wbGF0ZS5wbmcAAgEIAQAAAAACEgsABwAHAQcCBwMHBBEGOAAKATgBDAILAS4RBTgCCwI4AwIA",
+        "oRzrCwYAAAAKAQAMAgweAyocBEYIBU5GB5QBpQEIuQJgBpkDCAqhAwUMpgMpAA4BCwIGAg8CEAIRAAICAAEBBwEAAAIADAEAAQIDDAEAAQQEAgAFBQcAAAkAAQABCgEEAQACBwYHAQIDDAsBAQwEDQgJAAEDAgUDCgMCAggABwgEAAELAgEIAAEIBQELAQEJAAEIAAcJAAIKAgoCCgILAQEIBQcIBAILAwEJAAsCAQkAAQYIBAEFAQsDAQgAAgkABQxDb2luTWV0YWRhdGEGT3B0aW9uClRFU1RfVE9LRU4LVHJlYXN1cnlDYXAJVHhDb250ZXh0A1VybARjb2luD2NyZWF0ZV9jdXJyZW5jeQtkdW1teV9maWVsZARpbml0BG5vbmUGb3B0aW9uD3B1YmxpY190cmFuc2ZlcgZzZW5kZXIKdGVzdF90b2tlbgh0cmFuc2Zlcgp0eF9jb250ZXh0A3VybAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgoCBQRURVNUAAIBCAEAAAAAAhMLADEJBwAHAAcAOAAKATgBDAIKAS4RBDgCCwILAS4RBDgDAgA=",
         "base64"
       );
 
@@ -302,48 +284,54 @@ const BondingCurveInteraction: React.FC = () => {
       );
 
       // Replace the module and struct names in the bytecode
+      // Update from TEST_TOKEN to the user's token name
       let updated = update_identifiers(bytecode, {
-        TEMPLATE: structNameForToken,
-        template: moduleNameForToken,
+        TEST_TOKEN: structNameForToken,
+        test_token: moduleNameForToken,
       });
       console.log("update_identifiers completed successfully");
 
-      // Replace the token symbol
+      // Replace the token symbol (update from TEST to user's symbol)
       updated = update_constants(
         updated,
         bcs.string().serialize(tokenSymbol).toBytes(),
-        bcs.string().serialize("TMPL").toBytes(),
+        bcs.string().serialize("TEST").toBytes(),
         "Vector(U8)" // type of the constant
       );
       console.log("update_constants for symbol completed successfully");
 
-      // Replace the token name
+      // Replace the token name (update from TEST to user's name)
       updated = update_constants(
         updated,
         bcs.string().serialize(tokenName).toBytes(), // new value
-        bcs.string().serialize("Template Coin").toBytes(), // current value
+        bcs.string().serialize("TEST").toBytes(), // current value
         "Vector(U8)" // type of the constant
       );
       console.log("update_constants for name completed successfully");
 
-      // Replace the token description
+      // Replace the token description (update from TEST to user's description)
       updated = update_constants(
         updated,
         bcs.string().serialize(tokenDescription).toBytes(), // new value
-        bcs.string().serialize("Template Coin Description").toBytes(), // current value
+        bcs.string().serialize("TEST").toBytes(), // current value
         "Vector(U8)" // type of the constant
       );
       console.log("update_constants for description completed successfully");
 
-      // Replace the token icon URL with a default one
+      // Add icon URL if needed (not in the TEST_TOKEN template but we can add it)
       const iconUrl = "https://example.com/token-icon.png";
-      updated = update_constants(
-        updated,
-        bcs.string().serialize(iconUrl).toBytes(), // new value
-        bcs.string().serialize("https://example.com/template.png").toBytes(), // current value
-        "Vector(U8)" // type of the constant
-      );
-      console.log("update_constants for icon completed successfully");
+      try {
+        // Note: This may fail if the template doesn't have an icon URL to replace
+        updated = update_constants(
+          updated,
+          bcs.string().serialize(iconUrl).toBytes(), // new value
+          bcs.string().serialize("https://example.com/template.png").toBytes(), // try to replace if exists
+          "Vector(U8)" // type of the constant
+        );
+        console.log("update_constants for icon completed successfully");
+      } catch (iconError) {
+        console.log("Icon URL not updated, using default");
+      }
 
       console.log("Bytecode generation completed successfully");
       return updated;
@@ -440,6 +428,11 @@ const BondingCurveInteraction: React.FC = () => {
         // Step 2: Bind token to bonding curve
         const bindTx = new Transaction();
         bindTx.setGasBudget(100000000);
+
+        console.log("registryId:", registryId);
+        console.log("treasuryCapId:", treasuryCapId);
+        console.log("coinMetadataId:", coinMetadataId);
+        console.log("Coin type:", coinType);
 
         bindTx.moveCall({
           target: `${packageId}::bonding_curve::bind_token_to_curve_entry`,

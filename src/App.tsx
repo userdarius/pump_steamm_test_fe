@@ -56,19 +56,9 @@ const App: React.FC = () => {
                 marginBottom: "16px",
               }}
             >
-              Bonding Curve Protocol
+              Trade on the ridge.
             </h2>
-            <p
-              style={{
-                fontSize: "16px",
-                maxWidth: "600px",
-                margin: "0 auto",
-                color: "#4b5563",
-              }}
-            >
-              Interact with bonding curves to buy and sell tokens on Sui. Create
-              new tokens and trade on the decentralized curve.
-            </p>
+           
           </div>
 
           <BondingCurveInteraction />
