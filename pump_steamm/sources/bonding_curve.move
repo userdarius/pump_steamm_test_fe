@@ -22,11 +22,11 @@ use sui::math;
 const CURRENT_VERSION: u16 = 1;
 const MAX_SUPPLY: u64 = 1_000_000_000_000_000_000; // 1 billion tokens with 9 decimals
 
-// Updated constants to match the working simulation but with 9 decimals
-const INITIAL_VIRTUAL_SUI: u64 = 30_000_000_000; // 30 SUI with 9 decimals
-const INITIAL_VIRTUAL_TOKENS: u64 = 1_000_000_000_000_000; // 1 million tokens with 9 decimals
+// Updated constants with much higher virtual reserves
+const INITIAL_VIRTUAL_SUI: u64 = 30_000_000_000_000; // 30,000 SUI with 9 decimals (1000x increase)
+const INITIAL_VIRTUAL_TOKENS: u64 = 1_000_000_000_000_000_000; // 1 billion tokens with 9 decimals
 // K = INITIAL_VIRTUAL_SUI * INITIAL_VIRTUAL_TOKENS (calculated at runtime)
-const LISTING_THRESHOLD: u64 = 69_000_000_000; // 69 SUI with 9 decimals
+const LISTING_THRESHOLD: u64 = 69_000_000_000_000; // 69,000 SUI with 9 decimals (1000x increase)
 
 // Errors
 const EInsufficientLiquidity: u64 = 0;
@@ -98,12 +98,15 @@ public fun create_bonding_curve<T: drop>(
 }
 
 /// Helper function to create a bonding curve for a token using a otw
-public fun bind_token_to_curve<OTW: drop>(
+public fun bind_token_to_curve_entry<T: drop>(
     registry: &mut Registry,
-    treasury_cap: TreasuryCap<OTW>,
-    metadata: CoinMetadata<OTW>,
+    treasury_cap: TreasuryCap<T>,
+    metadata: CoinMetadata<T>,
     ctx: &mut TxContext
 ) {
+    // Make sure no tokens have been minted
+    assert!(coin::total_supply(&treasury_cap) == 0, EInvalidAmount);
+    
     let bonding_curve = create_bonding_curve(
         registry,
         treasury_cap,
@@ -111,7 +114,6 @@ public fun bind_token_to_curve<OTW: drop>(
         ctx
     );
     
-    // Share the bonding curve object
     transfer::share_object(bonding_curve);
 }
 
@@ -170,6 +172,9 @@ public entry fun buy<T>(
     emit_event(event);
     
     check_transition(bonding_curve);
+
+    // return the coin object
+    
 }
 
 /// Sell tokens back through bonding curve
@@ -199,6 +204,7 @@ public entry fun sell<T>(
         sui_received: sui_amount,
     };
     emit_event(event);
+
 }
 
 /// Calculate tokens to mint based on SUI amount
@@ -226,13 +232,13 @@ fun calculate_sui_to_receive<T>(bonding_curve: &BondingCurve<T>, token_amount: u
     // Calculate constant product K as INITIAL_VIRTUAL_SUI * INITIAL_VIRTUAL_TOKENS
     let k = (INITIAL_VIRTUAL_SUI as u128) * (INITIAL_VIRTUAL_TOKENS as u128);
     
-    // Calculate new virtual token amount
-    let new_virtual_tokens = (bonding_curve.virtual_token_reserves as u128) + (token_amount as u128);
-    
-    // Check if we would exceed the initial token supply
-    if (new_virtual_tokens >= (INITIAL_VIRTUAL_TOKENS as u128)) {
+    // Ensure we have enough virtual tokens to sell
+    if ((bonding_curve.virtual_token_reserves as u128) < (token_amount as u128)) {
         return 0
     };
+    
+    // Calculate new virtual token amount AFTER selling (decreasing reserves)
+    let new_virtual_tokens = (bonding_curve.virtual_token_reserves as u128) - (token_amount as u128);
     
     // Calculate what the SUI reserves should be after the sale using the formula:
     // new_sui_amount = K / (INITIAL_VIRTUAL_TOKENS - new_virtual_tokens)
