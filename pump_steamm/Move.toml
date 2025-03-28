@@ -1,6 +1,6 @@
 [package]
 name = "pump_steamm"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024.beta" # edition = "legacy" to use legacy (pre-2024) Move
 # license = ""           # e.g., "MIT", "GPL", "Apache 2.0"
 # authors = ["..."]      # e.g., ["Joe Smith (joesmith@noemail.com)", "John Snow (johnsnow@noemail.com)"]
@@ -20,9 +20,12 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 # Override = { local = "../conflicting/version", override = true }
 
 [addresses]
-# NOTE: After successful update, replace these with the new addresses
+# NOTE: For development, set to "0x0" for new deployments
 # pump_steamm = "0x0" # Used for deployment
-pump_steamm = "0x5b00e28f610059f800d783b98671fb1fd913b3f04edefd5b6d29a438c06e15ef" # Package ID
+pump_steamm = "0xdd718c698ebfb995e2ca740fd5c9ac625fe748b0a5e1e76db3ee629641688881" # Package ID - CURRENT DEPLOYMENT
+# pump_steamm = "0x55dd0d94b53f6e698b89dadaf51ff35e9979791727d9e2c6526825769222c658" # Previous Package ID
+# pump_steamm = "0x58447a5d140fde93fa97719865f9829d129d02e654c4b4aa8a8af5de74060f8a" # Previous Package ID
+# pump_steamm = "0x5b00e28f610059f800d783b98671fb1fd913b3f04edefd5b6d29a438c06e15ef" # Previous Package ID
 # pump_steamm = "0x4c80d97de0920eed5b2449b9805c70935c4254e60a58f9e26304c953f6cdd7f8"
 # pump_steamm = "0x9147edc49978f716a6fd00b14ae467c4035a78ca660503c2e3f18bc0b618d046"
 # pump_steamm = "0x3a15808b704196e34b2b651730982abcce673cd8d844692657968cec93900b91"
@@ -31,20 +34,8 @@ pump_steamm = "0x5b00e28f610059f800d783b98671fb1fd913b3f04edefd5b6d29a438c06e15e
 # pump_steamm = "0x68d75035a5a1d4298a6324342e47c467353e4c53dab65e15026ea95766e39570"
 # pump_steamm = "0x2530e02021b36fe37df207c1abee7f50870133fd6ea9c5e8bf596f8fe2f6f31b"
 # pump_steamm = "0xe5a379be247cfb0310a1292fb00cd662c3d775a1bcde2977235b0d209be5dac7"
-global_admin = "0xcffaf4f2cdaaa12f1976b457f13f386473025caf5b770cd3a341cfb1b13a2b75" # Global Admin Cap ID
-registry = "0xe32cb5061cdf7b6fb2fc8bdc984f0bc82522257ffb05285dc93de4293f655db3" # Registry ID
-upgrade_cap = "0x40e5e336bd209f487232efd2a91081fe5af2d860fad815744d9d7225f8f090c8" # UpgradeCap ID
+global_admin = "0xeb00993beea2cdbf25cd311f1f578316b0e2ea15cb017fbb28f2caf431372d1f" # Current Global Admin Cap ID
+registry = "0x7cd97809c61e369a592901d0b1c34520342e55325742420beae271d031c193f6" # Current Registry ID
+upgrade_cap = "0xd6fea4d68da91fd7a7190a1e3d387051b2a660698f626586163b526614ba539d" # Current UpgradeCap ID
 
-# Named addresses will be accessible in Move as `@name`. They're also exported:
-# for example, `std = "0x1"` is exported by the Standard Library.
-# alice = "0xA11CE"
-
-[dev-dependencies]
-# The dev-dependencies section allows overriding dependencies for `--test` and
-# `--dev` modes. You can introduce test-only dependencies here.
-# Local = { local = "../path/to/dev-build" }
-
-[dev-addresses]
-# The dev-addresses section allows overwriting named addresses for the `--test`
-# and `--dev` modes.
-# alice = "0xB0B"
+# Named addresses will be accessible in Move as `
