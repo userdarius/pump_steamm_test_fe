@@ -1734,7 +1734,7 @@ const BondingCurveInteraction: React.FC = () => {
                 onChange={(e) => setPackageId(e.target.value)}
                 placeholder="Package ID"
                 style={{
-                  width: "100%",
+                  width: "90%",
                   padding: "8px",
                   border: "1px solid #ddd",
                   borderRadius: "4px",
@@ -1758,7 +1758,7 @@ const BondingCurveInteraction: React.FC = () => {
                 onChange={(e) => setRegistryId(e.target.value)}
                 placeholder="Registry ID"
                 style={{
-                  width: "100%",
+                  width: "90%",
                   padding: "8px",
                   border: "1px solid #ddd",
                   borderRadius: "4px",
@@ -1791,7 +1791,7 @@ const BondingCurveInteraction: React.FC = () => {
                 onChange={(e) => setTokenName(e.target.value)}
                 placeholder="Token Name"
                 style={{
-                  width: "100%",
+                  width: "90%",
                   padding: "8px",
                   border: "1px solid #ddd",
                   borderRadius: "4px",
@@ -1815,7 +1815,7 @@ const BondingCurveInteraction: React.FC = () => {
                 onChange={(e) => setTokenSymbol(e.target.value)}
                 placeholder="Token Symbol"
                 style={{
-                  width: "100%",
+                  width: "90%",
                   padding: "8px",
                   border: "1px solid #ddd",
                   borderRadius: "4px",
@@ -1839,7 +1839,7 @@ const BondingCurveInteraction: React.FC = () => {
                 onChange={(e) => setTokenDescription(e.target.value)}
                 placeholder="Token Description"
                 style={{
-                  width: "100%",
+                  width: "90%",
                   padding: "8px",
                   border: "1px solid #ddd",
                   borderRadius: "4px",
